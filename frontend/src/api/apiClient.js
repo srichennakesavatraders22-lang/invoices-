@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_URL || '/api',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -65,7 +65,7 @@ export const invoicesAPI = {
   update: (id, data) => api.put(`/invoices/${id}`, data),
   delete: (id) => api.delete(`/invoices/${id}`),
   updateStatus: (id, status) => api.patch(`/invoices/${id}/status`, { status }),
-  getPDFUrl: (id) => `/api/invoices/${id}/pdf`,
+  getPDFUrl: (id) => `${import.meta.env.VITE_API_URL || ''}/api/invoices/${id}/pdf`,
 };
 
 export const settingsAPI = {
