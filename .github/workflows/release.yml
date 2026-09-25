@@ -38,6 +38,14 @@ jobs:
         env:
           VITE_API_URL: "http://localhost:5000"
 
+      - name: 🔄 Sync Version from Tag
+        working-directory: ./frontend
+        run: |
+          # PowerShell script to cleanly get version without 'v' prefix
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v', ''
+          npm version $version --no-git-tag-version --allow-same-version
+
       - name: 🚀 Build and Publish EXE
         working-directory: ./frontend
         run: npm run electron:build -- --publish always
