@@ -51,7 +51,7 @@ jobs:
         run: npm run electron:build -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VITE_API_URL: "http://localhost:5000"
+          VITE_API_URL: "https://invoices-l4mf.onrender.com"
 
       - name: 📤 Upload EXE to GitHub Releases
         uses: softprops/action-gh-release@v2
