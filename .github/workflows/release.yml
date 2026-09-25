@@ -46,12 +46,24 @@ jobs:
           $version = $tag -replace '^v', ''
           npm version $version --no-git-tag-version --allow-same-version
 
-      - name: 🚀 Build and Publish EXE
+      - name: 🚀 Build EXE
         working-directory: ./frontend
         run: npm run electron:build -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_API_URL: "http://localhost:5000"
+
+      - name: 📤 Upload EXE to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            frontend/dist/*.exe
+            frontend/dist/latest.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ─── Android APK ──────────────────────────────────────────────────────────
   build-apk:
