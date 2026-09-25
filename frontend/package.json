@@ -13,9 +13,6 @@
   "build": {
     "appId": "com.srichennakesava.invoice",
     "productName": "Sri Chennakesava Invoice",
-    "win": {
-      "icon": "public/invoice_logo.png"
-    },
     "publish": [
       {
         "provider": "github"
