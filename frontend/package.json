@@ -15,12 +15,17 @@
     "dev": "vite",
     "build": "vite build",
     "electron:build": "vite build && electron-builder",
+    "preview:exe": "vite build && electron-builder --dir -c.win.icon=null",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "build": {
     "appId": "com.srichennakesava.invoice",
     "productName": "Sri Chennakesava Invoice",
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*"
+    ],
     "win": {
       "icon": "public/invoice_logo.png"
     },
