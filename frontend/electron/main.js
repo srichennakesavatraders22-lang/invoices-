@@ -9,6 +9,9 @@ const __dirname = path.dirname(__filename);
 
 let mainWindow;
 
+// Fix for AMD GPU blank white screen bug on Windows
+app.disableHardwareAcceleration();
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -22,6 +25,7 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
+    mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   }
