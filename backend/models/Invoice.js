@@ -28,6 +28,17 @@ const invoiceItemSchema = new mongoose.Schema({
     required: true,
     min: 0,
   },
+  // ─── NEW: Discount per item ───
+  discountPercent: {
+    type: Number,
+    default: 0,
+    min: 0,
+    max: 100,
+  },
+  discountAmount: {
+    type: Number,
+    default: 0,
+  },
   taxableAmount: {
     type: Number,
     required: true,
@@ -68,6 +79,28 @@ const invoiceItemSchema = new mongoose.Schema({
   },
 });
 
+// ─── NEW: Payment breakdown schema ───
+const paymentBreakdownSchema = new mongoose.Schema({
+  method: {
+    type: String,
+    enum: ['Cash', 'UPI', 'Cheque', 'Bank Transfer', 'Credit'],
+    required: true,
+  },
+  amount: {
+    type: Number,
+    required: true,
+    min: 0,
+  },
+  reference: {
+    type: String,
+    default: '', // UPI txn ID, cheque number, etc.
+  },
+  paidAt: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
 const invoiceSchema = new mongoose.Schema(
   {
     invoiceNumber: {
@@ -84,24 +117,20 @@ const invoiceSchema = new mongoose.Schema(
       type: String,
       required: true,
       default: () => {
-        const d = new Date();
-        const dd = String(d.getDate()).padStart(2, '0');
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const yyyy = d.getFullYear();
+        const d = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+        const [yyyy, mm, dd] = d.split('-');
         return `${dd}-${mm}-${yyyy}`;
       },
     },
     invoiceTime: {
       type: String,
       required: true,
-      default: () => {
-        const d = new Date();
-        let hours = d.getHours();
-        const minutes = String(d.getMinutes()).padStart(2, '0');
-        const ampm = hours >= 12 ? 'PM' : 'AM';
-        hours = hours % 12 || 12;
-        return `${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
-      },
+      default: () => new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
+    },
+    // ─── NEW: Due date ───
+    dueDate: {
+      type: Date,
+      default: null,
     },
     customer: {
       type: mongoose.Schema.Types.ObjectId,
@@ -147,6 +176,17 @@ const invoiceSchema = new mongoose.Schema(
       required: true,
       default: 0,
     },
+    // ─── NEW: Invoice-level discount ───
+    discountPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
+    discountAmount: {
+      type: Number,
+      default: 0,
+    },
     totalCgst: {
       type: Number,
       default: 0,
@@ -177,10 +217,36 @@ const invoiceSchema = new mongoose.Schema(
       enum: ['Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled'],
       default: 'Sent',
     },
+    // ─── NEW: Payment method (primary) ───
+    paymentMethod: {
+      type: String,
+      enum: ['Cash', 'UPI', 'Cheque', 'Bank Transfer', 'Credit', 'Mixed', ''],
+      default: '',
+    },
+    // ─── NEW: Mixed payment breakdown ───
+    paymentBreakdown: [paymentBreakdownSchema],
+    // ─── NEW: Amount paid so far ───
+    amountPaid: {
+      type: Number,
+      default: 0,
+    },
     paymentDate: {
       type: Date,
     },
     notes: {
+      type: String,
+      default: '',
+    },
+    // ─── NEW: Transport details ───
+    transportMode: {
+      type: String,
+      default: '',
+    },
+    vehicleNumber: {
+      type: String,
+      default: '',
+    },
+    lrNumber: {
       type: String,
       default: '',
     },

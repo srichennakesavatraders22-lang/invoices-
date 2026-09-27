@@ -3,9 +3,10 @@ import cloudinary from '../config/cloudinary.js';
 
 // Helper to get or initialize default profile
 const getOrCreateCompanyProfile = async () => {
-  let profile = await CompanyProfile.findOne();
-  if (!profile) {
-    profile = await CompanyProfile.create({
+  let profiles = await CompanyProfile.find().sort({ createdAt: -1 });
+  
+  if (profiles.length === 0) {
+    return await CompanyProfile.create({
       businessName: 'SRI CHENNA KESAVA TRADERS',
       tagline: 'Wholesale & Distribution – Confectionery / Chocolates & Snacks',
       address: 'Beside Apsara Theatre, Chinna Chauku, Andhra Pradesh – 516002',
@@ -15,7 +16,14 @@ const getOrCreateCompanyProfile = async () => {
       invoicePrefix: 'SCKT/2026-27/',
     });
   }
-  return profile;
+
+  // If there are multiple profiles due to a race condition, keep the most recent one (index 0) and delete the rest
+  if (profiles.length > 1) {
+    const idsToDelete = profiles.slice(1).map(p => p._id);
+    await CompanyProfile.deleteMany({ _id: { $in: idsToDelete } });
+  }
+
+  return profiles[0];
 };
 
 // @desc    Get company profile
@@ -24,6 +32,7 @@ const getOrCreateCompanyProfile = async () => {
 export const getCompanyProfile = async (req, res, next) => {
   try {
     const profile = await getOrCreateCompanyProfile();
+    res.set('Cache-Control', 'no-store, max-age=0');
     res.json({
       success: true,
       data: profile,

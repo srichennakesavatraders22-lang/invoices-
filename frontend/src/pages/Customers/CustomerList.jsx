@@ -16,12 +16,41 @@ export const CustomerList = () => {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [formErrors, setFormErrors] = useState({});
+
+  // Validation
+  const validateCustomerForm = (data) => {
+    const errors = {};
+    if (!data.name.trim()) errors.name = 'Contact person name is required';
+    if (!data.businessName.trim()) errors.businessName = 'Business/store name is required';
+    if (!data.billingAddress.trim()) errors.billingAddress = 'Billing address is required';
+    // Mobile: 10-digit Indian format (optional +91 prefix)
+    const mobileClean = data.mobile.replace(/[\s\-\+]/g, '');
+    if (!data.mobile) {
+      errors.mobile = 'Mobile number is required';
+    } else if (!/^(91)?[6-9]\d{9}$/.test(mobileClean)) {
+      errors.mobile = 'Enter a valid 10-digit Indian mobile number';
+    }
+    // GSTIN: 15-char format (optional)
+    if (data.gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(data.gstin.trim().toUpperCase())) {
+      errors.gstin = 'Invalid GSTIN format (e.g. 37AAAAA0000A1ZA)';
+    }
+    // Email: basic format (optional)
+    if (data.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(data.email)) {
+      errors.email = 'Invalid email format';
+    }
+    return errors;
+  };
 
   // Form State
   const [formData, setFormData] = useState({
@@ -39,17 +68,20 @@ export const CustomerList = () => {
 
   useEffect(() => {
     fetchCustomers();
-  }, []);
+  }, [page]);
 
   const fetchCustomers = async () => {
     setLoading(true);
     try {
       const res = await customersAPI.getAll({
         search: search || undefined,
-        limit: 50,
+        page,
+        limit: 15,
       });
       if (res.success && res.data) {
         setCustomers(res.data);
+        setTotalPages(res.meta?.totalPages || 1);
+        setTotalCount(res.meta?.total || res.data.length || 0);
       }
     } catch (err) {
       toast.error('Failed to load customers');
@@ -60,28 +92,23 @@ export const CustomerList = () => {
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
+    setPage(1);
     fetchCustomers();
   };
 
   const openAddModal = () => {
     setSelectedCustomer(null);
+    setFormErrors({});
     setFormData({
-      name: '',
-      businessName: '',
-      billingAddress: '',
-      shippingAddress: '',
-      sameAsBilling: true,
-      gstin: '',
-      mobile: '',
-      email: '',
-      isInterState: false,
-      state: 'Andhra Pradesh',
+      name: '', businessName: '', billingAddress: '', shippingAddress: '',
+      sameAsBilling: true, gstin: '', mobile: '', email: '', isInterState: false, state: 'Andhra Pradesh',
     });
     setIsModalOpen(true);
   };
 
   const openEditModal = (cust) => {
     setSelectedCustomer(cust);
+    setFormErrors({});
     setFormData({
       name: cust.name,
       businessName: cust.businessName,
@@ -99,6 +126,13 @@ export const CustomerList = () => {
 
   const handleFormSubmit = async (e) => {
     e.preventDefault();
+    const errors = validateCustomerForm(formData);
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      toast.error('Please fix the form errors before saving');
+      return;
+    }
+    setFormErrors({});
     setSaving(true);
     try {
       if (selectedCustomer) {
@@ -134,39 +168,71 @@ export const CustomerList = () => {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2.5">
-            <Users className="h-6 w-6 text-sky-500" />
-            Wholesale Customer Accounts
-          </h1>
-          <p className="text-xs font-medium text-slate-500 mt-1">
-            Manage retail stores, GSTIN registrations, and interstate billing rules
-          </p>
+      {/* Compact Header & Search */}
+      <div className="water-glass rounded-2xl border border-sky-200 p-4 mb-5 shadow-sm">
+        {/* Row 1: Title & Actions & Pagination */}
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-2 pb-2 md:mb-4 md:pb-4 border-b border-sky-100/60">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div>
+              <h1 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                <Users className="h-5 w-5 text-sky-500" />
+                Wholesale Customer Accounts
+              </h1>
+            </div>
+
+            {/* Pagination Controls */}
+            <div className="flex items-center gap-2 bg-sky-50/50 rounded-xl px-2 py-1 border border-sky-100 mt-1 md:mt-0 md:ml-4">
+              <span className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[10px] font-bold text-sky-700 shadow-sm border border-sky-100">
+                Total: {totalCount}
+              </span>
+              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mx-1">
+                Page {page} of {Math.max(1, totalPages)}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  disabled={page <= 1}
+                  onClick={() => setPage(page - 1)}
+                  className="rounded-lg bg-white border border-sky-200 px-2 py-1 text-[10px] font-bold text-slate-600 shadow-sm hover:bg-sky-50 disabled:opacity-40 transition-colors"
+                >
+                  Prev
+                </button>
+                <button
+                  disabled={page >= totalPages}
+                  onClick={() => setPage(page + 1)}
+                  className="rounded-lg bg-white border border-sky-200 px-2 py-1 text-[10px] font-bold text-slate-600 shadow-sm hover:bg-sky-50 disabled:opacity-40 transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 mt-2 md:mt-0">
+            <button
+              onClick={openAddModal}
+              className="flex items-center gap-1.5 rounded-lg bg-sky-500 px-3 py-1.5 text-xs font-bold text-white shadow-md shadow-sky-500/20 transition-all hover:bg-sky-600 active:scale-[0.98]"
+            >
+              <Plus className="h-4 w-4 stroke-[3]" />
+              <span>Add Customer</span>
+            </button>
+          </div>
         </div>
 
-        <button
-          onClick={openAddModal}
-          className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 via-teal-500 to-emerald-500 px-4 py-2.5 text-sm font-bold text-white shadow-md shadow-sky-500/20 transition-all hover:brightness-105 active:scale-[0.98]"
-        >
-          <Plus className="h-4 w-4 stroke-[3]" />
-          <span>Add New Customer</span>
-        </button>
-      </div>
+        {/* Row 2: Search */}
+        <div className="flex items-center w-full">
+          <form onSubmit={handleSearchSubmit} className="relative w-full">
+            <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-sky-500" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by store name, contact, mobile, or GSTIN..."
+              className="w-full rounded-xl border border-sky-200/90 bg-white/95 py-2 pl-10 pr-4 text-xs font-semibold text-slate-800 placeholder-slate-400 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200 shadow-sm"
+            />
+          </form>
+        </div>
 
-      {/* Search Bar */}
-      <div className="water-glass rounded-2xl p-4">
-        <form onSubmit={handleSearchSubmit} className="relative w-full">
-          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-sky-500" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search customer by store name, contact person, mobile, or GSTIN..."
-            className="w-full rounded-xl border border-sky-200/90 bg-white/95 py-2 pl-10 pr-4 text-sm text-slate-800 placeholder-slate-400 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200 shadow-sm"
-          />
-        </form>
+
       </div>
 
       {/* Customers Directory: Mobile Cards + Desktop Table */}
@@ -377,82 +443,75 @@ export const CustomerList = () => {
             <form onSubmit={handleFormSubmit} className="mt-4 space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2 sm:col-span-1">
-                  <label className="block text-xs font-bold text-slate-600 mb-1">
-                    Store / Business Name *
-                  </label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Store / Business Name *</label>
                   <input
                     type="text"
-                    required
                     value={formData.businessName}
-                    onChange={(e) =>
-                      setFormData({ ...formData, businessName: e.target.value })
-                    }
+                    onChange={(e) => setFormData({ ...formData, businessName: e.target.value })}
                     placeholder="M/s Example Retail Store"
-                    className="w-full rounded-xl border border-sky-200 bg-white px-3.5 py-2 text-sm text-slate-800 shadow-sm focus:border-sky-500 focus:outline-none"
+                    className={`w-full rounded-xl border px-3.5 py-2 text-sm text-slate-800 shadow-sm focus:outline-none ${formErrors.businessName ? 'border-red-400 bg-red-50' : 'border-sky-200 bg-white focus:border-sky-500'}`}
                   />
+                  {formErrors.businessName && <p className="text-[10px] text-red-500 mt-0.5">⚠ {formErrors.businessName}</p>}
                 </div>
 
                 <div className="col-span-2 sm:col-span-1">
-                  <label className="block text-xs font-bold text-slate-600 mb-1">
-                    Contact Person Name *
-                  </label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Contact Person Name *</label>
                   <input
                     type="text"
-                    required
                     value={formData.name}
-                    onChange={(e) =>
-                      setFormData({ ...formData, name: e.target.value })
-                    }
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     placeholder="Suresh Kumar"
-                    className="w-full rounded-xl border border-sky-200 bg-white px-3.5 py-2 text-sm text-slate-800 shadow-sm focus:border-sky-500 focus:outline-none"
+                    className={`w-full rounded-xl border px-3.5 py-2 text-sm text-slate-800 shadow-sm focus:outline-none ${formErrors.name ? 'border-red-400 bg-red-50' : 'border-sky-200 bg-white focus:border-sky-500'}`}
                   />
+                  {formErrors.name && <p className="text-[10px] text-red-500 mt-0.5">⚠ {formErrors.name}</p>}
                 </div>
 
                 <div className="col-span-2 sm:col-span-1">
-                  <label className="block text-xs font-bold text-slate-600 mb-1">
-                    Mobile Number *
-                  </label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Mobile Number *</label>
                   <input
                     type="text"
-                    required
                     value={formData.mobile}
-                    onChange={(e) =>
-                      setFormData({ ...formData, mobile: e.target.value })
-                    }
+                    onChange={(e) => setFormData({ ...formData, mobile: e.target.value })}
                     placeholder="+91 90000 00000"
-                    className="w-full rounded-xl border border-sky-200 bg-white px-3.5 py-2 text-sm font-mono text-slate-800 shadow-sm focus:border-sky-500 focus:outline-none"
+                    className={`w-full rounded-xl border px-3.5 py-2 text-sm font-mono text-slate-800 shadow-sm focus:outline-none ${formErrors.mobile ? 'border-red-400 bg-red-50' : 'border-sky-200 bg-white focus:border-sky-500'}`}
                   />
+                  {formErrors.mobile && <p className="text-[10px] text-red-500 mt-0.5">⚠ {formErrors.mobile}</p>}
                 </div>
 
                 <div className="col-span-2 sm:col-span-1">
-                  <label className="block text-xs font-bold text-slate-600 mb-1">
-                    GSTIN (15 Digits)
-                  </label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">GSTIN (15 Digits)</label>
                   <input
                     type="text"
                     value={formData.gstin}
-                    onChange={(e) =>
-                      setFormData({ ...formData, gstin: e.target.value.toUpperCase() })
-                    }
+                    onChange={(e) => setFormData({ ...formData, gstin: e.target.value.toUpperCase() })}
                     placeholder="37XXXXX0000X1ZX"
-                    className="w-full rounded-xl border border-sky-200 bg-white px-3.5 py-2 text-sm font-mono uppercase text-slate-800 shadow-sm focus:border-sky-500 focus:outline-none"
+                    className={`w-full rounded-xl border px-3.5 py-2 text-sm font-mono uppercase text-slate-800 shadow-sm focus:outline-none ${formErrors.gstin ? 'border-red-400 bg-red-50' : 'border-sky-200 bg-white focus:border-sky-500'}`}
                   />
+                  {formErrors.gstin && <p className="text-[10px] text-red-500 mt-0.5">⚠ {formErrors.gstin}</p>}
+                </div>
+
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Email (Optional)</label>
+                  <input
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                    placeholder="example@domain.com"
+                    className={`w-full rounded-xl border px-3.5 py-2 text-sm text-slate-800 shadow-sm focus:outline-none ${formErrors.email ? 'border-red-400 bg-red-50' : 'border-sky-200 bg-white focus:border-sky-500'}`}
+                  />
+                  {formErrors.email && <p className="text-[10px] text-red-500 mt-0.5">⚠ {formErrors.email}</p>}
                 </div>
 
                 <div className="col-span-2">
-                  <label className="block text-xs font-bold text-slate-600 mb-1">
-                    Billing Address *
-                  </label>
+                  <label className="block text-xs font-bold text-slate-600 mb-1">Billing Address *</label>
                   <textarea
                     rows={2}
-                    required
                     value={formData.billingAddress}
-                    onChange={(e) =>
-                      setFormData({ ...formData, billingAddress: e.target.value })
-                    }
+                    onChange={(e) => setFormData({ ...formData, billingAddress: e.target.value })}
                     placeholder="Main Road, Kadapa, Andhra Pradesh - 516001"
-                    className="w-full rounded-xl border border-sky-200 bg-white px-3.5 py-2 text-sm text-slate-800 shadow-sm focus:border-sky-500 focus:outline-none"
+                    className={`w-full rounded-xl border px-3.5 py-2 text-sm text-slate-800 shadow-sm focus:outline-none ${formErrors.billingAddress ? 'border-red-400 bg-red-50' : 'border-sky-200 bg-white focus:border-sky-500'}`}
                   />
+                  {formErrors.billingAddress && <p className="text-[10px] text-red-500 mt-0.5">⚠ {formErrors.billingAddress}</p>}
                 </div>
 
                 {/* Same as Billing Checkbox */}

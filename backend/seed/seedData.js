@@ -18,23 +18,28 @@ import recalculateInvoice from '../utils/gstCalculator.js';
 
 dotenv.config();
 
+const now = new Date();
+const in5Days = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
+const in20Days = new Date(now.getTime() + 20 * 24 * 60 * 60 * 1000);
+const pastDate = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000);
+
 const sampleProducts = [
-  { name: 'Choco 24', category: 'Choco', packType: '24-pack', unit: 'Boxes', mrp: 480, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Vanila 24', category: 'Vanila', packType: '24-pack', unit: 'Boxes', mrp: 480, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Strawberry 24', category: 'Strawberry', packType: '24-pack', unit: 'Boxes', mrp: 480, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Coffee 24', category: 'Coffee', packType: '24-pack', unit: 'Boxes', mrp: 480, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Choco Jar', category: 'Choco', packType: 'Jar', unit: 'Boxes', mrp: 620, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Vanila Jar', category: 'Vanila', packType: 'Jar', unit: 'Boxes', mrp: 620, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Strawberry Jar', category: 'Strawberry', packType: 'Jar', unit: 'Boxes', mrp: 620, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Coffee Jar', category: 'Coffee', packType: 'Jar', unit: 'Boxes', mrp: 620, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Choco Jumbo', category: 'Choco', packType: 'Jumbo', unit: 'Boxes', mrp: 750, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Vanila Jumbo', category: 'Vanila', packType: 'Jumbo', unit: 'Boxes', mrp: 750, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Strawberry Jumbo', category: 'Strawberry', packType: 'Jumbo', unit: 'Boxes', mrp: 750, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Coffee Jumbo', category: 'Coffee', packType: 'Jumbo', unit: 'Boxes', mrp: 750, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Choco Pilo', category: 'Choco', packType: 'Pilo', unit: 'Boxes', mrp: 540, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Vanila Pilo', category: 'Vanila', packType: 'Pilo', unit: 'Boxes', mrp: 540, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Strawberry Pilo', category: 'Strawberry', packType: 'Pilo', unit: 'Boxes', mrp: 540, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
-  { name: 'Coffee Pilo', category: 'Coffee', packType: 'Pilo', unit: 'Boxes', mrp: 540, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010' },
+  { name: 'Choco 24', category: 'Choco', packType: '24-pack', unit: 'Boxes', mrp: 480, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 100, minStock: 20, expiryDate: in20Days, imageUrl: 'https://placehold.co/400x400/654321/FFFFFF?text=Choco+24' },
+  { name: 'Vanila 24', category: 'Vanila', packType: '24-pack', unit: 'Boxes', mrp: 480, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 15, minStock: 20, expiryDate: in5Days, imageUrl: 'https://placehold.co/400x400/F3E5AB/000000?text=Vanila+24' },
+  { name: 'Strawberry 24', category: 'Strawberry', packType: '24-pack', unit: 'Boxes', mrp: 480, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 50, minStock: 20, expiryDate: pastDate, imageUrl: 'https://placehold.co/400x400/FFC0CB/000000?text=Strawberry+24' },
+  { name: 'Coffee 24', category: 'Coffee', packType: '24-pack', unit: 'Boxes', mrp: 480, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 80, minStock: 20, expiryDate: in20Days, imageUrl: 'https://placehold.co/400x400/6F4E37/FFFFFF?text=Coffee+24' },
+  { name: 'Choco Jar', category: 'Choco', packType: 'Jar', unit: 'Boxes', mrp: 620, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 40, minStock: 15, expiryDate: in20Days, imageUrl: 'https://placehold.co/400x400/654321/FFFFFF?text=Choco+Jar' },
+  { name: 'Vanila Jar', category: 'Vanila', packType: 'Jar', unit: 'Boxes', mrp: 620, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 10, minStock: 15, expiryDate: in5Days, imageUrl: 'https://placehold.co/400x400/F3E5AB/000000?text=Vanila+Jar' },
+  { name: 'Strawberry Jar', category: 'Strawberry', packType: 'Jar', unit: 'Boxes', mrp: 620, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 60, minStock: 15, expiryDate: pastDate, imageUrl: 'https://placehold.co/400x400/FFC0CB/000000?text=Strawberry+Jar' },
+  { name: 'Coffee Jar', category: 'Coffee', packType: 'Jar', unit: 'Boxes', mrp: 620, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 120, minStock: 15, expiryDate: in20Days, imageUrl: 'https://placehold.co/400x400/6F4E37/FFFFFF?text=Coffee+Jar' },
+  { name: 'Choco Jumbo', category: 'Choco', packType: 'Jumbo', unit: 'Boxes', mrp: 750, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 30, minStock: 10, expiryDate: in20Days, imageUrl: 'https://placehold.co/400x400/654321/FFFFFF?text=Choco+Jumbo' },
+  { name: 'Vanila Jumbo', category: 'Vanila', packType: 'Jumbo', unit: 'Boxes', mrp: 750, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 8, minStock: 10, expiryDate: in5Days, imageUrl: 'https://placehold.co/400x400/F3E5AB/000000?text=Vanila+Jumbo' },
+  { name: 'Strawberry Jumbo', category: 'Strawberry', packType: 'Jumbo', unit: 'Boxes', mrp: 750, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 40, minStock: 10, expiryDate: pastDate, imageUrl: 'https://placehold.co/400x400/FFC0CB/000000?text=Strawberry+Jumbo' },
+  { name: 'Coffee Jumbo', category: 'Coffee', packType: 'Jumbo', unit: 'Boxes', mrp: 750, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 45, minStock: 10, expiryDate: in20Days, imageUrl: 'https://placehold.co/400x400/6F4E37/FFFFFF?text=Coffee+Jumbo' },
+  { name: 'Choco Pilo', category: 'Choco', packType: 'Pilo', unit: 'Boxes', mrp: 540, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 60, minStock: 25, expiryDate: in20Days, imageUrl: 'https://placehold.co/400x400/654321/FFFFFF?text=Choco+Pilo' },
+  { name: 'Vanila Pilo', category: 'Vanila', packType: 'Pilo', unit: 'Boxes', mrp: 540, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 20, minStock: 25, expiryDate: in5Days, imageUrl: 'https://placehold.co/400x400/F3E5AB/000000?text=Vanila+Pilo' },
+  { name: 'Strawberry Pilo', category: 'Strawberry', packType: 'Pilo', unit: 'Boxes', mrp: 540, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 55, minStock: 25, expiryDate: pastDate, imageUrl: 'https://placehold.co/400x400/FFC0CB/000000?text=Strawberry+Pilo' },
+  { name: 'Coffee Pilo', category: 'Coffee', packType: 'Pilo', unit: 'Boxes', mrp: 540, cgstPercent: 2.5, sgstPercent: 0, igstPercent: 5, hsnCode: '18069010', stock: 70, minStock: 25, expiryDate: in20Days, imageUrl: 'https://placehold.co/400x400/6F4E37/FFFFFF?text=Coffee+Pilo' },
 ];
 
 const seedDB = async () => {
@@ -170,13 +175,33 @@ const seedDB = async () => {
       totalTax: calc.totalTax,
       grandTotal: calc.grandTotal,
       amountInWords: calc.amountInWords,
-      status: 'Sent',
+      status: 'Paid',
       notes: 'Standard distribution delivery via Chinna Chauku dispatch.',
+      paymentMethod: 'Mixed',
+      paymentBreakdown: [
+        { method: 'Cash', amount: 10000, reference: '' },
+        { method: 'UPI', amount: calc.grandTotal - 10000, reference: 'UPI123456789' }
+      ],
+      amountPaid: calc.grandTotal,
+      paymentDate: new Date(),
+      transportMode: 'Road',
+      vehicleNumber: 'AP04 BX 1234',
+      lrNumber: 'LR-987654321',
+      dueDate: new Date(now.getTime() + 15 * 24 * 60 * 60 * 1000),
+      discountPercent: 0,
     });
 
     console.log(`Reference Invoice SCKT/2026-27/0001 successfully seeded!`);
     console.log(`Sub Total: Rs. ${calc.subTotal}, CGST: Rs. ${calc.totalCgst}, Grand Total: Rs. ${calc.grandTotal}`);
     console.log(`Words: ${calc.amountInWords}`);
+
+    // Decrement stock for the seeded invoice
+    for (const item of calc.items) {
+      await Product.findByIdAndUpdate(item.product, {
+        $inc: { stock: -item.qty },
+      });
+    }
+    console.log('Stock updated for seeded invoice.');
 
     process.exit(0);
   } catch (error) {

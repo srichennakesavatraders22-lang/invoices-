@@ -5,8 +5,8 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../../context/AuthContext';
 
 export const Login = () => {
-  const [email, setEmail] = useState('admin@chennakesava.com');
-  const [password, setPassword] = useState('admin123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
@@ -46,12 +46,7 @@ export const Login = () => {
           </p>
         </div>
 
-        {/* Demo Credentials Alert */}
-        <div className="mb-5 rounded-2xl border border-sky-100 bg-sky-50/80 p-3 text-xs text-slate-700 shadow-inner">
-          <p className="font-bold text-sky-800 mb-0.5">Demo Credentials Loaded:</p>
-          <p className="font-mono text-[11px] text-slate-600 truncate">Email: <span className="text-sky-700 font-bold">admin@chennakesava.com</span></p>
-          <p className="font-mono text-[11px] text-slate-600">Pass: <span className="text-sky-700 font-bold">admin123</span></p>
-        </div>
+
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

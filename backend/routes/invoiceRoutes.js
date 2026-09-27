@@ -7,6 +7,7 @@ import {
   deleteInvoice,
   updateInvoiceStatus,
   streamInvoicePDF,
+  exportInvoicesExcel,
 } from '../controllers/invoiceController.js';
 import { protect, authorize } from '../middleware/auth.js';
 
@@ -15,6 +16,8 @@ const router = express.Router();
 router.route('/')
   .get(getInvoices)
   .post(protect, createInvoice);
+
+router.get('/export/excel', exportInvoicesExcel);
 
 router.route('/:id')
   .get(getInvoiceById)

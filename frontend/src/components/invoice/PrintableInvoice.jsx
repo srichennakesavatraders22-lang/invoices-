@@ -1,4 +1,5 @@
 import React from 'react';
+import { convertTo12HourFormat } from '../../utils/timeUtils';
 
 /**
  * Pixel-perfect, compact component matching the Sri Chenna Kesava Traders Tax Invoice Reference
@@ -28,6 +29,23 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
         '5. This is a computer generated invoice.',
       ];
 
+  const totalCgst = invoice.totalCgst || 0;
+  const totalSgst = invoice.totalSgst || 0;
+  const totalIgst = invoice.totalIgst || 0;
+  const hasItems = items.length > 0;
+  const isInterState = invoice.customerSnapshot?.isInterState || false;
+
+  let showCgst = totalCgst > 0;
+  let showSgst = totalSgst > 0;
+  let showIgst = totalIgst > 0;
+
+  if (!showCgst && !showSgst && !showIgst) {
+    if (isInterState) showIgst = true;
+    else { showCgst = true; showSgst = true; }
+  }
+
+  const colSpanCount = 4 + (showCgst ? 1 : 0) + (showSgst ? 1 : 0) + (showIgst ? 1 : 0);
+
   return (
     <div
       className={`invoice-paper bg-white text-black font-sans shadow-md mx-auto transition-all ${
@@ -38,10 +56,10 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
       }}
     >
       {/* Outer Border Container */}
-      <div className="border-[1.5px] border-black p-3 sm:p-4 text-[11px] leading-tight">
+      <div className="border-[1.5px] border-black p-2 sm:p-3 text-[11px] leading-tight">
         {/* 1. Header Section - Big logo positioned beside the company details with a clean gap */}
-        <div className="pb-2 flex items-center justify-center gap-4 sm:gap-6">
-          {company.logoUrl && (
+        <div className="pb-1.5 sm:pb-2 flex items-center justify-center gap-3 sm:gap-6">
+          {company.logoUrl ? (
             <div className="flex-shrink-0 flex items-center justify-center">
               <img
                 src={company.logoUrl}
@@ -49,7 +67,11 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
                 className="h-16 sm:h-20 w-auto max-w-[85px] sm:max-w-[110px] object-contain"
               />
             </div>
-          )}
+          ) : !isPrintMode ? (
+            <div className="flex-shrink-0 flex items-center justify-center h-16 w-16 sm:h-20 sm:w-20 rounded-xl bg-slate-100 border-2 border-dashed border-slate-300">
+              <span className="text-[10px] font-bold text-slate-400 text-center px-1">LOGO<br/>HERE</span>
+            </div>
+          ) : null}
           <div className={company.logoUrl ? "text-left min-w-0" : "text-center min-w-0"}>
             <h1 className="text-sm sm:text-base font-extrabold tracking-wide text-black uppercase leading-tight">
               {company.businessName || 'SRI CHENNA KESAVA TRADERS'}
@@ -79,7 +101,7 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
         {/* 3. Three-Column Info Block */}
         <div className="grid grid-cols-1 sm:grid-cols-12 border-b-[1.5px] border-black divide-y sm:divide-y-0 sm:divide-x-[1.5px] divide-black text-[10px]">
           {/* Bill To */}
-          <div className="sm:col-span-5 p-2 flex flex-col justify-between">
+          <div className="sm:col-span-5 p-1.5 sm:p-2 flex flex-col justify-between">
             <div>
               <p className="font-bold text-black text-[10.5px] mb-0.5">Bill To:</p>
               <p className="font-bold text-black">{customer.businessName || customer.name}</p>
@@ -96,7 +118,7 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
           </div>
 
           {/* Ship To */}
-          <div className="sm:col-span-4 p-2 flex flex-col justify-between">
+          <div className="sm:col-span-4 p-1.5 sm:p-2 flex flex-col justify-between">
             <div>
               <p className="font-bold text-black text-[10.5px] mb-0.5">Ship To:</p>
               <p className="font-bold text-black">{customer.businessName || customer.name}</p>
@@ -113,7 +135,7 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
           </div>
 
           {/* Invoice Metadata */}
-          <div className="sm:col-span-3 p-2 flex flex-col justify-center space-y-1 bg-neutral-50/50">
+          <div className="sm:col-span-3 p-1.5 sm:p-2 flex flex-col justify-center space-y-1 bg-neutral-50/50">
             <div>
               <span className="font-bold text-black block">Invoice No.:</span>
               <span className="font-bold text-black font-mono text-[10.5px]">
@@ -126,7 +148,7 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
             </div>
             <div>
               <span className="font-bold text-black">Invoice Time: </span>
-              <span className="font-medium text-black">{invoice.invoiceTime}</span>
+              <span className="font-medium text-black">{convertTo12HourFormat(invoice.invoiceTime)}</span>
             </div>
           </div>
         </div>
@@ -139,23 +161,18 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
                 <th className="border-r-[1px] border-black py-1 px-1 w-6">S.No</th>
                 <th className="border-r-[1px] border-black py-1 px-1.5 text-left">Item Name (SKU)</th>
                 <th className="border-r-[1px] border-black py-1 px-1 w-12">Qty<br />(Boxes)</th>
-                <th className="border-r-[1px] border-black py-1 px-1 text-right w-16">MRP<br />(Rs.)</th>
-                <th className="border-r-[1px] border-black py-1 px-1 text-right w-16">CGST<br />(Rs.)</th>
-                <th className="border-r-[1px] border-black py-1 px-1 text-right w-16">IGST<br />(Rs.)</th>
+                <th className="border-r-[1px] border-black py-1 px-1 text-right w-12">MRP<br />(Rs.)</th>
+                {showCgst && <th className="border-r-[1px] border-black py-1 px-1 text-right w-12">CGST<br />(Rs.)</th>}
+                {showSgst && <th className="border-r-[1px] border-black py-1 px-1 text-right w-12">SGST<br />(Rs.)</th>}
+                {showIgst && <th className="border-r-[1px] border-black py-1 px-1 text-right w-12">IGST<br />(Rs.)</th>}
                 <th className="py-1 px-1.5 text-right w-20">Amount<br />(Rs.)</th>
               </tr>
             </thead>
             <tbody>
               {items.map((item, index) => {
-                const isInterState = invoice.customerSnapshot?.isInterState;
-                const cgstFormatted =
-                  item.cgstAmount && !isInterState
-                    ? formatINR(item.cgstAmount)
-                    : '-';
-                const igstFormatted =
-                  item.igstAmount && isInterState
-                    ? formatINR(item.igstAmount)
-                    : '-';
+                const cgstFormatted = item.cgstAmount > 0 ? formatINR(item.cgstAmount) : '-';
+                const sgstFormatted = item.sgstAmount > 0 ? formatINR(item.sgstAmount) : '-';
+                const igstFormatted = item.igstAmount > 0 ? formatINR(item.igstAmount) : '-';
 
                 return (
                   <tr
@@ -169,16 +186,25 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
                     <td className="border-r-[1px] border-black py-0.5 px-1 font-semibold">
                       {item.qty}
                     </td>
-                    <td className="border-r-[1px] border-black py-0.5 px-1 text-right font-mono">
+                    <td className="border-r-[1px] border-black py-0.5 px-1 text-right font-mono whitespace-nowrap">
                       {formatINR(item.mrp)}
                     </td>
-                    <td className="border-r-[1px] border-black py-0.5 px-1 text-right font-mono">
-                      {cgstFormatted}
-                    </td>
-                    <td className="border-r-[1px] border-black py-0.5 px-1 text-right font-mono">
-                      {igstFormatted}
-                    </td>
-                    <td className="py-0.5 px-1.5 text-right font-mono font-medium">
+                    {showCgst && (
+                      <td className="border-r-[1px] border-black py-0.5 px-1 text-right font-mono whitespace-nowrap">
+                        {cgstFormatted}
+                      </td>
+                    )}
+                    {showSgst && (
+                      <td className="border-r-[1px] border-black py-0.5 px-1 text-right font-mono whitespace-nowrap">
+                        {sgstFormatted}
+                      </td>
+                    )}
+                    {showIgst && (
+                      <td className="border-r-[1px] border-black py-0.5 px-1 text-right font-mono whitespace-nowrap">
+                        {igstFormatted}
+                      </td>
+                    )}
+                    <td className="py-0.5 px-1.5 text-right font-mono font-medium whitespace-nowrap">
                       {formatINR(item.amount)}
                     </td>
                   </tr>
@@ -190,23 +216,32 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
                 <td colSpan={4} className="border-r-[1px] border-black py-1 px-2 text-right">
                   Sub Total
                 </td>
-                <td className="border-r-[1px] border-black py-1 px-1 text-right font-mono">
-                  {formatINR(invoice.totalCgst)}
-                </td>
-                <td className="border-r-[1px] border-black py-1 px-1 text-right font-mono">
-                  {formatINR(invoice.totalIgst)}
-                </td>
-                <td className="py-1 px-1.5 text-right font-mono">
+                {showCgst && (
+                  <td className="border-r-[1px] border-black py-1 px-1 text-right font-mono whitespace-nowrap">
+                    {formatINR(invoice.totalCgst)}
+                  </td>
+                )}
+                {showSgst && (
+                  <td className="border-r-[1px] border-black py-1 px-1 text-right font-mono whitespace-nowrap">
+                    {formatINR(invoice.totalSgst)}
+                  </td>
+                )}
+                {showIgst && (
+                  <td className="border-r-[1px] border-black py-1 px-1 text-right font-mono whitespace-nowrap">
+                    {formatINR(invoice.totalIgst)}
+                  </td>
+                )}
+                <td className="py-1 px-1.5 text-right font-mono whitespace-nowrap">
                   {formatINR(invoice.subTotal)}
                 </td>
               </tr>
 
               {/* Grand Total Row */}
               <tr className="border-b-[1.5px] border-black font-bold text-[10.5px] bg-neutral-50">
-                <td colSpan={6} className="border-r-[1px] border-black py-1 px-2 text-right uppercase tracking-wider">
+                <td colSpan={colSpanCount} className="border-r-[1px] border-black py-1 px-2 text-right uppercase tracking-wider">
                   Grand Total
                 </td>
-                <td className="py-1 px-1.5 text-right font-mono text-black font-black">
+                <td className="py-1 px-1.5 text-right font-mono text-black font-black whitespace-nowrap">
                   Rs. {formatINR(invoice.grandTotal)}
                 </td>
               </tr>
@@ -225,7 +260,7 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
         {/* 6. Terms & Conditions and Bank Details Box */}
         <div className="border-b-[1.5px] border-black grid grid-cols-1 sm:grid-cols-12 divide-y sm:divide-y-0 sm:divide-x-[1.5px] divide-black text-[9px] leading-snug">
           {/* Terms & Conditions */}
-          <div className="sm:col-span-7 p-2">
+          <div className="sm:col-span-7 p-1.5 sm:p-2">
             <p className="font-bold text-black mb-0.5">Terms & Conditions:</p>
             <ol className="list-none space-y-0.5 text-neutral-700">
               {terms.map((term, i) => (
@@ -237,7 +272,7 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
           </div>
 
           {/* Bank & Remittance Details */}
-          <div className="sm:col-span-5 p-2 bg-neutral-50/50 flex flex-col justify-start">
+          <div className="sm:col-span-5 p-1.5 sm:p-2 bg-neutral-50/50 flex flex-col justify-start">
             <p className="font-bold text-black uppercase tracking-wider text-[9px] mb-1">
               Bank Details:
             </p>
@@ -263,6 +298,32 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
               <p className="text-neutral-500 italic text-[8.5px]">
                 Add bank details in Settings to display account number & IFSC on invoice.
               </p>
+            )}
+
+            {/* Payment Details Section */}
+            {invoice.paymentMethod && (
+              <div className="mt-2 pt-1.5 border-t border-black/20">
+                <p className="font-bold text-black uppercase tracking-wider text-[9px] mb-0.5">
+                  Payment Info:
+                </p>
+                <div className="space-y-0.5">
+                  <p className="text-neutral-800">
+                    <span className="font-bold text-black">Method:</span> {invoice.paymentMethod === 'Mixed' ? 'Split / Mixed Payment' : invoice.paymentMethod}
+                  </p>
+                  {invoice.paymentMethod === 'Mixed' && invoice.paymentBreakdown?.length > 0 && (
+                    <div className="mt-1 pl-1">
+                      {invoice.paymentBreakdown.map((p, i) => {
+                        if (!p.amount) return null;
+                        return (
+                          <p key={i} className="text-[8.5px] text-neutral-800 leading-tight">
+                            • {p.method}: <span className="font-mono font-bold text-black">Rs. {formatINR(p.amount)}</span> {p.reference ? <span className="italic text-neutral-600">(Ref: {p.reference})</span> : ''}
+                          </p>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </div>
         </div>

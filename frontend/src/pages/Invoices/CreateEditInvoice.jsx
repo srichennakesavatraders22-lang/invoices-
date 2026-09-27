@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   FileText,
@@ -24,6 +24,57 @@ import confetti from 'canvas-confetti';
 import { invoicesAPI, customersAPI, productsAPI, settingsAPI } from '../../api/apiClient';
 import PrintableInvoice from '../../components/invoice/PrintableInvoice';
 import numberToWordsIndian from '../../utils/amountInWords';
+import { getISTTimeString, formatISTInvoiceDate, convertTo12HourFormat, convertDateToInputFormat, convertDateFromInputFormat, convertTimeToInputFormat } from '../../utils/timeUtils';
+
+/**
+ * InvoiceScaler — Scales a 760px-wide invoice to fill its container.
+ * Uses ResizeObserver so it re-calculates on panel/window resize.
+ */
+const INVOICE_NATURAL_WIDTH = 760;
+const InvoiceScaler = ({ children }) => {
+  const wrapperRef = useRef(null);
+  const innerRef = useRef(null);
+
+  const recalc = useCallback(() => {
+    const wrapper = wrapperRef.current;
+    const inner = innerRef.current;
+    if (!wrapper || !inner) return;
+
+    // Reset transform to measure natural dimensions
+    inner.style.transform = 'none';
+    inner.style.width = `${INVOICE_NATURAL_WIDTH}px`;
+
+    const containerWidth = wrapper.parentElement?.clientWidth || wrapper.clientWidth || INVOICE_NATURAL_WIDTH;
+    const naturalHeight = inner.scrollHeight;
+    const scale = Math.min(1, containerWidth / INVOICE_NATURAL_WIDTH);
+
+    // Center horizontally: offset = (containerWidth - scaledWidth) / 2
+    const scaledWidth = INVOICE_NATURAL_WIDTH * scale;
+    const offsetX = Math.max(0, (containerWidth - scaledWidth) / 2);
+
+    inner.style.transformOrigin = 'top left';
+    inner.style.transform = `translateX(${offsetX}px) scale(${scale})`;
+    // Height of wrapper = natural height × scale (since scale shrinks visually)
+    wrapper.style.height = `${naturalHeight * scale}px`;
+  }, []);
+
+  useEffect(() => {
+    // Initial recalc after paint
+    const t = setTimeout(recalc, 50);
+    const ro = new ResizeObserver(recalc);
+    if (wrapperRef.current?.parentElement) ro.observe(wrapperRef.current.parentElement);
+    window.addEventListener('resize', recalc);
+    return () => { clearTimeout(t); ro.disconnect(); window.removeEventListener('resize', recalc); };
+  }, [recalc, children]);
+
+  return (
+    <div ref={wrapperRef} className="relative overflow-hidden w-full">
+      <div ref={innerRef}>
+        {children}
+      </div>
+    </div>
+  );
+};
 
 export const CreateEditInvoice = () => {
   const { id } = useParams();
@@ -49,21 +100,19 @@ export const CreateEditInvoice = () => {
   const [shippingAddress, setShippingAddress] = useState('');
   const [sameAsBilling, setSameAsBilling] = useState(true);
   const [notes, setNotes] = useState('Standard distribution delivery via Chinna Chauku dispatch.');
-  const [invoiceDate, setInvoiceDate] = useState(() => {
-    const d = new Date();
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const yyyy = d.getFullYear();
-    return `${dd}-${mm}-${yyyy}`;
-  });
-  const [invoiceTime, setInvoiceTime] = useState(() => {
-    const d = new Date();
-    let hours = d.getHours();
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    hours = hours % 12 || 12;
-    return `${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
-  });
+  const [invoiceDate, setInvoiceDate] = useState(formatISTInvoiceDate);
+  const [invoiceTime, setInvoiceTime] = useState(getISTTimeString);
+  const [dateError, setDateError] = useState('');
+
+  // ─── NEW: Payment, Discount, Transport ───────────────────────────────────────
+  const [paymentMethod, setPaymentMethod] = useState('');
+  const [paymentBreakdown, setPaymentBreakdown] = useState([]);
+  const [showMixedPayment, setShowMixedPayment] = useState(false);
+  const [discountPercent, setDiscountPercent] = useState(0);
+  const [dueDate, setDueDate] = useState('');
+  const [transportMode, setTransportMode] = useState('');
+  const [vehicleNumber, setVehicleNumber] = useState('');
+  const [lrNumber, setLrNumber] = useState('');
 
   // Dynamic Line Items
   const [items, setItems] = useState([
@@ -107,9 +156,19 @@ export const CreateEditInvoice = () => {
           const inv = invRes.data;
           setSelectedCustomerId(inv.customer);
           setInvoiceDate(inv.invoiceDate);
-          setInvoiceTime(inv.invoiceTime);
+          setInvoiceTime(convertTo12HourFormat(inv.invoiceTime));
           setNotes(inv.notes || '');
           setShippingAddress(inv.customerSnapshot?.shippingAddress || '');
+          setPaymentMethod(inv.paymentMethod || '');
+          setDiscountPercent(inv.discountPercent || 0);
+          setDueDate(inv.dueDate ? new Date(inv.dueDate).toISOString().split('T')[0] : '');
+          setTransportMode(inv.transportMode || '');
+          setVehicleNumber(inv.vehicleNumber || '');
+          setLrNumber(inv.lrNumber || '');
+          if (inv.paymentBreakdown && inv.paymentBreakdown.length > 0) {
+            setPaymentBreakdown(inv.paymentBreakdown.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference || '' })));
+            setShowMixedPayment(inv.paymentMethod === 'Mixed');
+          }
 
           const mappedItems = inv.items.map((it) => ({
             productId: it.product,
@@ -134,6 +193,32 @@ export const CreateEditInvoice = () => {
         }
         if (prodRes.data && prodRes.data.length > 0) {
           const p = prodRes.data[0];
+          const isInterState = custRes.data && custRes.data.length > 0 ? custRes.data[0].isInterState : false;
+          
+          let cp = parseFloat(p.cgstPercent) || 0;
+          let sp = parseFloat(p.sgstPercent) || 0;
+          let ip = parseFloat(p.igstPercent) || 0;
+
+          if (cp === 0 && sp === 0 && ip === 0) {
+            cp = 2.5; sp = 2.5; ip = 5.0;
+          }
+
+          let useIgst = isInterState;
+          if (ip === 0 && (cp > 0 || sp > 0)) useIgst = false;
+          else if (cp === 0 && sp === 0 && ip > 0) useIgst = true;
+
+          const taxable = 10 * p.mrp;
+          let cgstAmt = 0, sgstAmt = 0, igstAmt = 0;
+
+          if (useIgst) {
+            igstAmt = (taxable * ip) / 100;
+            cp = 0; sp = 0;
+          } else {
+            cgstAmt = (taxable * cp) / 100;
+            sgstAmt = (taxable * sp) / 100;
+            ip = 0;
+          }
+
           setItems([
             {
               productId: p._id,
@@ -141,14 +226,14 @@ export const CreateEditInvoice = () => {
               qty: 10,
               mrp: p.mrp,
               unit: p.unit || 'Boxes',
-              cgstPercent: p.cgstPercent || 2.5,
-              sgstPercent: p.sgstPercent || 0,
-              igstPercent: p.igstPercent || 5.0,
-              taxableAmount: 10 * p.mrp,
-              cgstAmount: (10 * p.mrp * (p.cgstPercent || 2.5)) / 100,
-              sgstAmount: 0,
-              igstAmount: 0,
-              lineAmount: 10 * p.mrp + (10 * p.mrp * (p.cgstPercent || 2.5)) / 100,
+              cgstPercent: cp,
+              sgstPercent: sp,
+              igstPercent: ip,
+              taxableAmount: taxable,
+              cgstAmount: Number(cgstAmt.toFixed(2)),
+              sgstAmount: Number(sgstAmt.toFixed(2)),
+              igstAmount: Number(igstAmt.toFixed(2)),
+              lineAmount: Number((taxable + cgstAmt + sgstAmt + igstAmt).toFixed(2)),
             },
           ]);
         }
@@ -176,73 +261,82 @@ export const CreateEditInvoice = () => {
   };
 
   // Line Item Calculations
+  const calculateLineTaxes = (itemConfig, qty, isInterState) => {
+    const mrp = itemConfig.mrp || 0;
+    const taxable = qty * mrp;
+
+    let cp = parseFloat(itemConfig.cgstPercent) || 0;
+    let sp = parseFloat(itemConfig.sgstPercent) || 0;
+    let ip = parseFloat(itemConfig.igstPercent) || 0;
+
+    if (cp === 0 && sp === 0 && ip === 0) {
+      cp = 2.5; sp = 2.5; ip = 5.0;
+    }
+
+    let useIgst = isInterState;
+    // Override interstate logic if product explicitly only supports one type
+    if (ip === 0 && (cp > 0 || sp > 0)) useIgst = false;
+    else if (cp === 0 && sp === 0 && ip > 0) useIgst = true;
+
+    let cgstAmt = 0, sgstAmt = 0, igstAmt = 0;
+
+    if (useIgst) {
+      igstAmt = (taxable * ip) / 100;
+      cp = 0; sp = 0;
+    } else {
+      cgstAmt = (taxable * cp) / 100;
+      sgstAmt = (taxable * sp) / 100;
+      ip = 0;
+    }
+
+    return {
+      taxableAmount: taxable,
+      cgstPercent: cp,
+      sgstPercent: sp,
+      igstPercent: ip,
+      cgstAmount: Number(cgstAmt.toFixed(2)),
+      sgstAmount: Number(sgstAmt.toFixed(2)),
+      igstAmount: Number(igstAmt.toFixed(2)),
+      lineAmount: Number((taxable + cgstAmt + sgstAmt + igstAmt).toFixed(2)),
+    };
+  };
+
   const updateRowProduct = (index, productId) => {
     const prod = products.find((p) => p._id === productId);
     if (!prod) return;
 
     const newItems = [...items];
     const qty = newItems[index].qty || 1;
-    const mrp = prod.mrp;
-    const taxable = qty * mrp;
-
     const isInterState = selectedCustomer?.isInterState || false;
-    let cgstAmt = 0;
-    let sgstAmt = 0;
-    let igstAmt = 0;
-
-    if (isInterState) {
-      igstAmt = (taxable * (prod.igstPercent || 5.0)) / 100;
-    } else {
-      cgstAmt = (taxable * (prod.cgstPercent || 2.5)) / 100;
-      sgstAmt = (taxable * (prod.sgstPercent || 0)) / 100;
-    }
+    
+    const taxData = calculateLineTaxes(prod, qty, isInterState);
 
     newItems[index] = {
       productId: prod._id,
       productName: prod.name,
       qty,
-      mrp,
+      mrp: prod.mrp,
       unit: prod.unit || 'Boxes',
-      cgstPercent: prod.cgstPercent || 2.5,
-      sgstPercent: prod.sgstPercent || 0,
-      igstPercent: prod.igstPercent || 5.0,
-      taxableAmount: taxable,
-      cgstAmount: Number(cgstAmt.toFixed(2)),
-      sgstAmount: Number(sgstAmt.toFixed(2)),
-      igstAmount: Number(igstAmt.toFixed(2)),
-      lineAmount: Number((taxable + cgstAmt + sgstAmt + igstAmt).toFixed(2)),
+      ...taxData
     };
 
     setItems(newItems);
   };
 
   const updateRowQty = (index, qtyVal) => {
-    const qty = Math.max(1, parseInt(qtyVal, 10) || 1);
+    let qty = qtyVal === '' ? '' : parseInt(qtyVal, 10);
+    if (qty !== '' && (isNaN(qty) || qty < 0)) qty = 0;
+
+    const numericQty = qty === '' ? 0 : qty;
     const newItems = [...items];
     const row = newItems[index];
-    const mrp = row.mrp || 0;
-    const taxable = qty * mrp;
-
     const isInterState = selectedCustomer?.isInterState || false;
-    let cgstAmt = 0;
-    let sgstAmt = 0;
-    let igstAmt = 0;
-
-    if (isInterState) {
-      igstAmt = (taxable * (row.igstPercent || 5.0)) / 100;
-    } else {
-      cgstAmt = (taxable * (row.cgstPercent || 2.5)) / 100;
-      sgstAmt = (taxable * (row.sgstPercent || 0)) / 100;
-    }
+    const taxData = calculateLineTaxes(row, numericQty, isInterState);
 
     newItems[index] = {
       ...row,
       qty,
-      taxableAmount: taxable,
-      cgstAmount: Number(cgstAmt.toFixed(2)),
-      sgstAmount: Number(sgstAmt.toFixed(2)),
-      igstAmount: Number(igstAmt.toFixed(2)),
-      lineAmount: Number((taxable + cgstAmt + sgstAmt + igstAmt).toFixed(2)),
+      ...taxData
     };
 
     setItems(newItems);
@@ -268,11 +362,8 @@ export const CreateEditInvoice = () => {
     }
 
     const qty = 5;
-    const mrp = defaultProduct.mrp;
-    const taxable = qty * mrp;
     const isInterState = selectedCustomer?.isInterState || false;
-    const cgstAmt = !isInterState ? (taxable * (defaultProduct.cgstPercent || 2.5)) / 100 : 0;
-    const igstAmt = isInterState ? (taxable * (defaultProduct.igstPercent || 5.0)) / 100 : 0;
+    const taxData = calculateLineTaxes(defaultProduct, qty, isInterState);
 
     setItems([
       ...items,
@@ -280,16 +371,9 @@ export const CreateEditInvoice = () => {
         productId: defaultProduct._id,
         productName: defaultProduct.name,
         qty,
-        mrp,
+        mrp: defaultProduct.mrp,
         unit: defaultProduct.unit || 'Boxes',
-        cgstPercent: defaultProduct.cgstPercent || 2.5,
-        sgstPercent: defaultProduct.sgstPercent || 0,
-        igstPercent: defaultProduct.igstPercent || 5.0,
-        taxableAmount: taxable,
-        cgstAmount: Number(cgstAmt.toFixed(2)),
-        sgstAmount: 0,
-        igstAmount: Number(igstAmt.toFixed(2)),
-        lineAmount: Number((taxable + cgstAmt + igstAmt).toFixed(2)),
+        ...taxData
       },
     ]);
   };
@@ -309,9 +393,7 @@ export const CreateEditInvoice = () => {
 
     const populated = products.map((p, idx) => {
       const qty = quantities[idx % quantities.length] || 5;
-      const taxable = qty * p.mrp;
-      const cgstAmt = !isInterState ? (taxable * (p.cgstPercent || 2.5)) / 100 : 0;
-      const igstAmt = isInterState ? (taxable * (p.igstPercent || 5.0)) / 100 : 0;
+      const taxData = calculateLineTaxes(p, qty, isInterState);
 
       return {
         productId: p._id,
@@ -319,14 +401,7 @@ export const CreateEditInvoice = () => {
         qty,
         mrp: p.mrp,
         unit: p.unit || 'Boxes',
-        cgstPercent: p.cgstPercent || 2.5,
-        sgstPercent: p.sgstPercent || 0,
-        igstPercent: p.igstPercent || 5.0,
-        taxableAmount: taxable,
-        cgstAmount: Number(cgstAmt.toFixed(2)),
-        sgstAmount: 0,
-        igstAmount: Number(igstAmt.toFixed(2)),
-        lineAmount: Number((taxable + cgstAmt + igstAmt).toFixed(2)),
+        ...taxData
       };
     });
 
@@ -340,9 +415,41 @@ export const CreateEditInvoice = () => {
   const totalSgst = items.reduce((acc, row) => acc + (row.sgstAmount || 0), 0);
   const totalIgst = items.reduce((acc, row) => acc + (row.igstAmount || 0), 0);
   const totalTax = totalCgst + totalSgst + totalIgst;
-  const grandTotal = subTotal + totalTax;
+  const isIgstInvoice = totalIgst > 0 || (totalCgst === 0 && totalSgst === 0 && selectedCustomer?.isInterState);
+  
+  const discountAmt = Number(((subTotal + totalTax) * (discountPercent || 0) / 100).toFixed(2));
+  const grandTotal = Math.max(0, subTotal + totalTax - discountAmt);
   const totalBoxes = items.reduce((acc, row) => acc + (row.qty || 0), 0);
   const liveAmountInWords = numberToWordsIndian(grandTotal);
+
+  // Date format validator: DD-MM-YYYY
+  const validateDate = (val) => {
+    const regex = /^(0[1-9]|[12][0-9]|3[01])-(0[1-9]|1[0-2])-\d{4}$/;
+    return regex.test(val);
+  };
+
+  const handleInvoiceDateChange = (val) => {
+    setInvoiceDate(val);
+    if (val && !validateDate(val)) {
+      setDateError('Invalid date format. Use DD-MM-YYYY');
+    } else {
+      setDateError('');
+    }
+  };
+
+  // Mixed payment breakdown helpers
+  const addPaymentEntry = () => {
+    setPaymentBreakdown([...paymentBreakdown, { method: 'Cash', amount: '', reference: '' }]);
+  };
+  const removePaymentEntry = (i) => {
+    setPaymentBreakdown(paymentBreakdown.filter((_, idx) => idx !== i));
+  };
+  const updatePaymentEntry = (i, field, val) => {
+    const updated = [...paymentBreakdown];
+    updated[i] = { ...updated[i], [field]: val };
+    setPaymentBreakdown(updated);
+  };
+  const totalPaid = paymentBreakdown.reduce((s, p) => s + Number(p.amount || 0), 0);
 
   const formatINR = (val) => {
     return Number(val || 0).toLocaleString('en-IN', {
@@ -400,6 +507,8 @@ export const CreateEditInvoice = () => {
     grandTotal,
     amountInWords: liveAmountInWords,
     status: 'Draft',
+    paymentMethod: showMixedPayment && paymentBreakdown.length > 1 ? 'Mixed' : paymentMethod,
+    paymentBreakdown,
   };
 
   const handleSubmit = async (status = 'Sent') => {
@@ -407,13 +516,36 @@ export const CreateEditInvoice = () => {
       return toast.error('Please select a customer for this invoice');
     }
 
+    // Date format validation
+    if (invoiceDate && !validateDate(invoiceDate)) {
+      return toast.error('Invoice date must be in DD-MM-YYYY format');
+    }
+
     const payloadItems = items.map((it) => ({
       product: it.productId,
       qty: it.qty,
     }));
 
-    if (payloadItems.some((it) => !it.product || !it.qty)) {
-      return toast.error('Please select valid products and quantities for all rows');
+    if (payloadItems.some((it) => !it.product)) {
+      return toast.error('Please select a valid product for each row');
+    }
+    if (payloadItems.some((it) => !it.qty || it.qty < 1)) {
+      return toast.error('Quantity must be at least 1 for all rows');
+    }
+
+    // Check for duplicate SKUs
+    const ids = payloadItems.map((it) => it.product);
+    const hasDuplicates = ids.length !== new Set(ids).size;
+    if (hasDuplicates) {
+      toast(`Warning: Same SKU added multiple times. Consider merging rows.`, { icon: '⚠️', duration: 4000 });
+    }
+
+    // Validate mixed payment if enabled
+    if (showMixedPayment && paymentBreakdown.length > 0) {
+      const hasInvalidEntry = paymentBreakdown.some((p) => !p.method || !p.amount || Number(p.amount) <= 0);
+      if (hasInvalidEntry) {
+        return toast.error('All payment entries must have a valid method and amount');
+      }
     }
 
     setSaving(true);
@@ -426,6 +558,13 @@ export const CreateEditInvoice = () => {
         status,
         invoiceDate,
         invoiceTime,
+        paymentMethod: showMixedPayment && paymentBreakdown.length > 1 ? 'Mixed' : paymentMethod,
+        paymentBreakdown: showMixedPayment && paymentBreakdown.length > 0 ? paymentBreakdown : [],
+        discountPercent: Number(discountPercent || 0),
+        dueDate: dueDate || null,
+        transportMode: transportMode || '',
+        vehicleNumber: vehicleNumber || '',
+        lrNumber: lrNumber || '',
       };
 
       let res;
@@ -435,11 +574,7 @@ export const CreateEditInvoice = () => {
       } else {
         res = await invoicesAPI.create(payload);
         toast.success(`Tax Invoice ${res.data.invoiceNumber} Generated!`);
-        confetti({
-          particleCount: 90,
-          spread: 80,
-          origin: { y: 0.6 },
-        });
+        confetti({ particleCount: 90, spread: 80, origin: { y: 0.6 } });
       }
 
       navigate(`/invoices/${res.data._id}`);
@@ -618,7 +753,7 @@ export const CreateEditInvoice = () => {
                         : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                     }`}
                   >
-                    {selectedCustomer.isInterState ? 'Interstate (IGST 5%)' : 'Intrastate (CGST 2.5%)'}
+                    {isIgstInvoice ? 'Interstate (IGST 5%)' : 'Intrastate (CGST/SGST)'}
                   </span>
                 )}
               </div>
@@ -718,15 +853,19 @@ export const CreateEditInvoice = () => {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-600 mb-1">
-                    Invoice Date
+                    Invoice Date *
                   </label>
                   <input
-                    type="text"
-                    value={invoiceDate}
-                    onChange={(e) => setInvoiceDate(e.target.value)}
-                    placeholder="DD-MM-YYYY"
-                    className="w-full rounded-xl border border-sky-200 bg-white px-3 py-1.5 text-xs text-slate-800 font-mono font-semibold focus:border-sky-500 focus:outline-none"
+                    type="date"
+                    value={convertDateToInputFormat(invoiceDate)}
+                    onChange={(e) => handleInvoiceDateChange(convertDateFromInputFormat(e.target.value))}
+                    className={`w-full rounded-xl border bg-white px-3 py-1.5 text-xs text-slate-800 font-mono font-semibold focus:outline-none ${
+                      dateError ? 'border-red-400 focus:border-red-500' : 'border-sky-200 focus:border-sky-500'
+                    }`}
                   />
+                  {dateError && (
+                    <p className="text-[10px] text-red-500 font-semibold mt-0.5">⚠ {dateError}</p>
+                  )}
                 </div>
 
                 <div>
@@ -734,10 +873,9 @@ export const CreateEditInvoice = () => {
                     Invoice Time
                   </label>
                   <input
-                    type="text"
-                    value={invoiceTime}
-                    onChange={(e) => setInvoiceTime(e.target.value)}
-                    placeholder="11:45 AM"
+                    type="time"
+                    value={convertTimeToInputFormat(invoiceTime)}
+                    onChange={(e) => setInvoiceTime(convertTo12HourFormat(e.target.value))}
                     className="w-full rounded-xl border border-sky-200 bg-white px-3 py-1.5 text-xs text-slate-800 font-mono font-semibold focus:border-sky-500 focus:outline-none"
                   />
                 </div>
@@ -827,7 +965,9 @@ export const CreateEditInvoice = () => {
                           </button>
                           <input
                             type="number"
-                            min="1"
+                            onWheel={(e) => e.target.blur()}
+                            onKeyDown={(e) => ['-', '+', 'e', 'E'].includes(e.key) && e.preventDefault()}
+                            min="0"
                             value={row.qty}
                             onChange={(e) => updateRowQty(index, e.target.value)}
                             className="w-14 text-center rounded-lg border border-sky-200 bg-white py-1 text-xs font-mono font-bold text-slate-900 shadow-xs focus:border-sky-500 focus:outline-none"
@@ -855,12 +995,12 @@ export const CreateEditInvoice = () => {
                     {/* Tax & Line Amount breakdown */}
                     <div className="flex items-center justify-between text-xs pt-1 border-t border-sky-50">
                       <div className="text-slate-500 text-[10.5px]">
-                        Tax ({selectedCustomer?.isInterState ? 'IGST' : 'CGST'}):{' '}
+                        Tax ({isIgstInvoice ? 'IGST' : 'CGST/SGST'}):{' '}
                         <span className="font-mono font-bold text-slate-700">
                           Rs.{' '}
-                          {selectedCustomer?.isInterState
+                          {isIgstInvoice
                             ? formatINR(row.igstAmount)
-                            : formatINR(row.cgstAmount)}
+                            : formatINR((row.cgstAmount || 0) + (row.sgstAmount || 0))}
                         </span>
                       </div>
                       <div className="text-right">
@@ -895,9 +1035,15 @@ export const CreateEditInvoice = () => {
                       <th className="py-2.5 w-24 text-center">Qty (Boxes)</th>
                       <th className="py-2.5 w-24 text-right">MRP (Rs.)</th>
                       <th className="py-2.5 w-24 text-right">Taxable</th>
-                      <th className="py-2.5 w-24 text-right">
-                        {selectedCustomer?.isInterState ? 'IGST' : 'CGST'}
-                      </th>
+                      {!isIgstInvoice && (
+                        <>
+                          <th className="py-2.5 w-20 text-right">CGST</th>
+                          <th className="py-2.5 w-20 text-right">SGST</th>
+                        </>
+                      )}
+                      {isIgstInvoice && (
+                        <th className="py-2.5 w-24 text-right">IGST</th>
+                      )}
                       <th className="py-2.5 w-28 text-right">Amount (Rs.)</th>
                       <th className="py-2.5 pr-3 w-10 text-center"></th>
                     </tr>
@@ -925,7 +1071,9 @@ export const CreateEditInvoice = () => {
                         <td className="py-2 text-center">
                           <input
                             type="number"
-                            min="1"
+                            onWheel={(e) => e.target.blur()}
+                            onKeyDown={(e) => ['-', '+', 'e', 'E'].includes(e.key) && e.preventDefault()}
+                            min="0"
                             value={row.qty}
                             onChange={(e) => updateRowQty(index, e.target.value)}
                             className="w-16 text-center rounded-lg border border-sky-200 bg-white py-1 text-xs font-mono font-bold text-slate-900 shadow-xs focus:border-sky-500 focus:outline-none"
@@ -937,11 +1085,21 @@ export const CreateEditInvoice = () => {
                         <td className="py-2 text-right font-mono text-xs font-semibold text-slate-600">
                           {formatINR(row.taxableAmount)}
                         </td>
-                        <td className="py-2 text-right font-mono text-xs font-semibold text-slate-600">
-                          {selectedCustomer?.isInterState
-                            ? formatINR(row.igstAmount)
-                            : formatINR(row.cgstAmount)}
-                        </td>
+                        {!isIgstInvoice && (
+                          <>
+                            <td className="py-2 text-right font-mono text-xs font-semibold text-slate-600">
+                              {formatINR(row.cgstAmount)}
+                            </td>
+                            <td className="py-2 text-right font-mono text-xs font-semibold text-slate-600">
+                              {formatINR(row.sgstAmount)}
+                            </td>
+                          </>
+                        )}
+                        {isIgstInvoice && (
+                          <td className="py-2 text-right font-mono text-xs font-semibold text-slate-600">
+                            {formatINR(row.igstAmount)}
+                          </td>
+                        )}
                         <td className="py-2 text-right font-mono font-bold text-slate-900 text-xs">
                           {formatINR(row.lineAmount)}
                         </td>
@@ -960,9 +1118,10 @@ export const CreateEditInvoice = () => {
                 </table>
               </div>
 
-              {/* Order Notes & Summary */}
-              <div className="border-t border-sky-100 bg-white/75 p-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+              {/* Order Notes & Summary + Payment & Discount */}
+              <div className="border-t border-sky-100 bg-white/75 p-4 space-y-4">
+                {/* Notes row */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-start">
                   <div>
                     <label className="block text-[11px] font-bold text-slate-600 mb-1">
                       Order / Delivery Notes
@@ -979,24 +1138,213 @@ export const CreateEditInvoice = () => {
                     </p>
                   </div>
 
+                  {/* Totals Summary */}
                   <div className="rounded-xl border border-sky-200/90 bg-gradient-to-br from-sky-50/80 via-white to-teal-50/80 p-3 space-y-1.5 shadow-xs">
                     <div className="flex justify-between text-xs font-medium text-slate-600">
                       <span>Sub Total:</span>
                       <span className="font-mono font-bold text-slate-800">Rs. {formatINR(subTotal)}</span>
                     </div>
-
                     <div className="flex justify-between text-xs font-medium text-slate-600">
-                      <span>{selectedCustomer?.isInterState ? 'IGST (5%):' : 'CGST (2.5%):'}</span>
+                      <span>{isIgstInvoice ? 'IGST:' : 'CGST:'}</span>
                       <span className="font-mono font-bold text-slate-800">
-                        Rs. {formatINR(selectedCustomer?.isInterState ? totalIgst : totalCgst)}
+                        Rs. {formatINR(isIgstInvoice ? totalIgst : totalCgst)}
                       </span>
                     </div>
-
+                    {!isIgstInvoice && (
+                      <div className="flex justify-between text-xs font-medium text-slate-600">
+                        <span>SGST:</span>
+                        <span className="font-mono font-bold text-slate-800">
+                          Rs. {formatINR(totalSgst)}
+                        </span>
+                      </div>
+                    )}
+                    {discountPercent > 0 && (
+                      <div className="flex justify-between text-xs font-medium text-emerald-700">
+                        <span>Discount ({discountPercent}%):</span>
+                        <span className="font-mono font-bold">- Rs. {formatINR(discountAmt)}</span>
+                      </div>
+                    )}
                     <div className="border-t border-sky-200 pt-1.5 flex justify-between text-sm font-extrabold text-slate-900">
                       <span>Grand Total:</span>
                       <span className="font-mono text-sky-600 text-base font-black">
                         Rs. {formatINR(grandTotal)}
                       </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ─── NEW: Payment Method + Discount + Due Date ─── */}
+                <div className="rounded-xl border border-sky-100 bg-sky-50/40 p-3.5 space-y-3">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-slate-600">Payment & Financial Details</h3>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {/* Payment Method */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Payment Method</label>
+                      <select
+                        value={paymentMethod}
+                        onChange={(e) => {
+                          setPaymentMethod(e.target.value);
+                          setShowMixedPayment(false);
+                          setPaymentBreakdown([]);
+                        }}
+                        className="w-full rounded-xl border border-sky-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-sky-500 focus:outline-none"
+                      >
+                        <option value="">-- Select --</option>
+                        <option value="Cash">Cash</option>
+                        <option value="UPI">UPI</option>
+                        <option value="Cheque">Cheque</option>
+                        <option value="Bank Transfer">Bank Transfer</option>
+                        <option value="Credit">Credit</option>
+                      </select>
+                    </div>
+
+                    {/* Discount % */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Discount %</label>
+                      <input
+                        type="number"
+                        onWheel={(e) => e.target.blur()}
+                        onKeyDown={(e) => ['-', '+', 'e', 'E'].includes(e.key) && e.preventDefault()}
+                        min="0"
+                        max="100"
+                        step="0.5"
+                        value={discountPercent}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '') setDiscountPercent('');
+                          else setDiscountPercent(Math.min(100, Math.max(0, Number(val))));
+                        }}
+                        className="w-full rounded-xl border border-sky-200 bg-white px-2.5 py-1.5 text-xs font-mono font-semibold text-slate-800 focus:border-sky-500 focus:outline-none"
+                        placeholder="0"
+                      />
+                    </div>
+
+                    {/* Due Date */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Due Date</label>
+                      <input
+                        type="date"
+                        value={dueDate}
+                        onChange={(e) => setDueDate(e.target.value)}
+                        className="w-full rounded-xl border border-sky-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:border-sky-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Mixed Payment Toggle */}
+                    <div className="flex flex-col justify-end">
+                      <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={showMixedPayment}
+                          onChange={(e) => {
+                            setShowMixedPayment(e.target.checked);
+                            if (e.target.checked && paymentBreakdown.length === 0) {
+                              setPaymentBreakdown([
+                                { method: 'Cash', amount: '', reference: '' },
+                                { method: 'UPI', amount: '', reference: '' },
+                              ]);
+                            }
+                          }}
+                          className="rounded text-sky-600 h-3.5 w-3.5"
+                        />
+                        <span className="text-xs font-bold text-slate-600">Split / Mixed Payment</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Mixed Payment Breakdown */}
+                  {showMixedPayment && (
+                    <div className="rounded-xl border border-sky-200 bg-white p-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-slate-700">Payment Breakdown</p>
+                        <div className="flex items-center gap-2">
+                          {totalPaid > 0 && (
+                            <span className={`text-[10px] font-bold ${Math.abs(totalPaid - grandTotal) < 0.01 ? 'text-emerald-600' : 'text-orange-600'}`}>
+                              Paid: Rs. {formatINR(totalPaid)} / Rs. {formatINR(grandTotal)}
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={addPaymentEntry}
+                            className="text-[10px] font-bold text-sky-600 bg-sky-50 px-2 py-1 rounded-lg hover:bg-sky-100"
+                          >
+                            + Add
+                          </button>
+                        </div>
+                      </div>
+                      {paymentBreakdown.map((entry, i) => (
+                        <div key={i} className="grid grid-cols-12 gap-2 items-center">
+                          <select
+                            value={entry.method}
+                            onChange={(e) => updatePaymentEntry(i, 'method', e.target.value)}
+                            className="col-span-3 rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-xs font-semibold text-slate-700 focus:outline-none"
+                          >
+                            <option value="Cash">Cash</option>
+                            <option value="UPI">UPI</option>
+                            <option value="Cheque">Cheque</option>
+                            <option value="Bank Transfer">Bank</option>
+                            <option value="Credit">Credit</option>
+                          </select>
+                          <input
+                            type="number"
+                            onWheel={(e) => e.target.blur()}
+                            onKeyDown={(e) => ['-', '+', 'e', 'E'].includes(e.key) && e.preventDefault()}
+                            min="0"
+                            placeholder="Amount"
+                            value={entry.amount}
+                            onChange={(e) => updatePaymentEntry(i, 'amount', e.target.value)}
+                            className="col-span-4 rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs font-mono font-bold text-slate-900 focus:border-sky-500 focus:outline-none"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Ref / Txn ID"
+                            value={entry.reference}
+                            onChange={(e) => updatePaymentEntry(i, 'reference', e.target.value)}
+                            className="col-span-4 rounded-lg border border-sky-200 bg-white px-2 py-1.5 text-xs text-slate-600 focus:border-sky-500 focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removePaymentEntry(i)}
+                            className="col-span-1 flex items-center justify-center text-slate-400 hover:text-rose-500"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Transport Details */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Transport Mode</label>
+                      <input
+                        type="text"
+                        value={transportMode}
+                        onChange={(e) => setTransportMode(e.target.value)}
+                        placeholder="Road / Rail / Air"
+                        className="w-full rounded-xl border border-sky-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:border-sky-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Vehicle No.</label>
+                      <input
+                        type="text"
+                        value={vehicleNumber}
+                        onChange={(e) => setVehicleNumber(e.target.value)}
+                        placeholder="AP 05 XX 0000"
+                        className="w-full rounded-xl border border-sky-200 bg-white px-2.5 py-1.5 text-xs font-mono text-slate-700 focus:border-sky-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">LR Number</label>
+                      <input
+                        type="text"
+                        value={lrNumber}
+                        onChange={(e) => setLrNumber(e.target.value)}
+                        placeholder="LR / E-Way bill no."
+                        className="w-full rounded-xl border border-sky-200 bg-white px-2.5 py-1.5 text-xs font-mono text-slate-700 focus:border-sky-500 focus:outline-none"
+                      />
                     </div>
                   </div>
                 </div>
@@ -1033,11 +1381,20 @@ export const CreateEditInvoice = () => {
                 </div>
               </div>
 
-              {/* Scrollable Printable Invoice Container with responsive scale */}
-              <div className="overflow-x-auto max-h-[calc(100vh-170px)] overflow-y-auto rounded-xl border border-sky-200/80 bg-slate-50/70 p-1 sm:p-2 shadow-inner">
-                <div className="origin-top-left sm:origin-top transform scale-[0.60] xs:scale-[0.70] sm:scale-[0.88] 2xl:scale-[0.95] transition-transform my-[-20px]">
+              {/* Scrollable Printable Invoice Container — scale-to-fit */}
+              <div
+                className="overflow-y-auto overflow-x-hidden rounded-xl border border-sky-200/80 bg-white shadow-inner"
+                style={{ maxHeight: 'calc(100vh - 185px)' }}
+              >
+                {/* 
+                  Strategy: Invoice is naturally 760px wide.
+                  We render it at full width inside an overflow:hidden wrapper,
+                  then CSS scales it down. The outer wrapper height = invoice height × scale,
+                  preventing clipping.
+                */}
+                <InvoiceScaler>
                   <PrintableInvoice invoice={livePreviewInvoice} />
-                </div>
+                </InvoiceScaler>
               </div>
             </div>
           </div>

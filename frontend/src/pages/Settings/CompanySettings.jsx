@@ -29,7 +29,9 @@ export const CompanySettings = () => {
   // View mode: 'split' (side-by-side with live preview), 'form' (form only), 'preview' (full preview)
   const [viewMode, setViewMode] = useState('split');
   // Zoom scale for the preview sheet
-  const [zoomScale, setZoomScale] = useState(0.82);
+  const [zoomScale, setZoomScale] = useState(() => {
+    return typeof window !== 'undefined' && window.innerWidth < 640 ? 0.45 : 0.82;
+  });
   // Sample invoice dataset toggle
   const [sampleType, setSampleType] = useState('retail'); // 'retail' or 'wholesale16'
   // Mobile section tab: 'general', 'bank', 'terms', 'preview'
@@ -248,18 +250,19 @@ export const CompanySettings = () => {
   }
 
   return (
-    <form onSubmit={handleFormSubmit} className="space-y-4 pb-16">
-      {/* Header & Controls */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 border-b border-sky-100/80 pb-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2.5">
-            <Building2 className="h-6 w-6 text-sky-500" />
-            Company Profile & Invoice Settings
-          </h1>
-          <p className="text-xs font-medium text-slate-500 mt-0.5">
-            Configure entity info, Cloudinary logo & stamp, bank details, and inspect the real-time live tax invoice preview as you type
-          </p>
-        </div>
+    <form onSubmit={handleFormSubmit} className="space-y-2 sm:space-y-4 pb-16">
+      {/* Compact Header */}
+      <div className="water-glass rounded-2xl border border-sky-200 p-3 sm:p-4 mb-2 sm:mb-5 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2.5">
+              <Building2 className="h-6 w-6 text-sky-500" />
+              Company Profile & Settings
+            </h1>
+            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-0.5">
+              Configure entity info, logos, bank, and live tax invoice preview
+            </p>
+          </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
           {/* View Mode Toggle (Desktop only) */}
@@ -323,9 +326,10 @@ export const CompanySettings = () => {
           </button>
         </div>
       </div>
+      </div>
 
       {/* PhonePe / Google Pay Style Mobile Tabs */}
-      <div className="flex lg:hidden overflow-x-auto gap-1.5 p-1 rounded-2xl bg-white border border-sky-100 shadow-xs mb-3 scrollbar-none">
+      <div className="flex lg:hidden overflow-x-auto gap-1.5 p-1 rounded-2xl bg-white border border-sky-100 shadow-xs mb-2 sm:mb-3 scrollbar-none">
         <button
           type="button"
           onClick={() => setMobileTab('general')}
@@ -374,7 +378,7 @@ export const CompanySettings = () => {
 
       {/* Main Grid: Form on Left, Live Preview on Right */}
       <div
-        className={`grid gap-5 items-start ${
+        className={`grid gap-3 sm:gap-5 items-start ${
           viewMode === 'split'
             ? 'grid-cols-1 lg:grid-cols-12'
             : 'grid-cols-1'
@@ -388,7 +392,7 @@ export const CompanySettings = () => {
             }`}
           >
             {/* 1. Basic Profile & Identity */}
-            <div className={`water-glass rounded-2xl p-5 space-y-4 border border-sky-100 shadow-xs ${
+            <div className={`water-glass rounded-2xl p-3 sm:p-5 space-y-2 sm:space-y-4 border border-sky-100 shadow-xs ${
               mobileTab === 'general' ? 'block' : 'hidden lg:block'
             }`}>
               <div className="flex items-center justify-between border-b border-sky-100 pb-2.5">
@@ -405,7 +409,7 @@ export const CompanySettings = () => {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 sm:gap-3.5">
                 <div className="md:col-span-2">
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Business Name (Invoice Title) *
@@ -504,7 +508,7 @@ export const CompanySettings = () => {
             </div>
 
             {/* 2. Cloudinary Media Upload (Logo & Stamp) */}
-            <div className={`water-glass rounded-2xl p-5 space-y-4 border border-sky-100 shadow-xs ${
+            <div className={`water-glass rounded-2xl p-3 sm:p-5 space-y-2 sm:space-y-4 border border-sky-100 shadow-xs ${
               mobileTab === 'general' ? 'block' : 'hidden lg:block'
             }`}>
               <div className="flex items-center justify-between border-b border-sky-100 pb-2.5">
@@ -521,7 +525,7 @@ export const CompanySettings = () => {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-4">
                 {/* Logo Upload */}
                 <div className="rounded-xl bg-sky-50/70 p-3.5 border border-sky-200/80 flex flex-col justify-between">
                   <div>
@@ -617,7 +621,7 @@ export const CompanySettings = () => {
             </div>
 
             {/* 3. Bank & Settlement Details */}
-            <div className={`water-glass rounded-2xl p-5 space-y-3.5 border border-sky-100 shadow-xs ${
+            <div className={`water-glass rounded-2xl p-3 sm:p-5 space-y-2 sm:space-y-3.5 border border-sky-100 shadow-xs ${
               mobileTab === 'bank' ? 'block' : 'hidden lg:block'
             }`}>
               <div className="flex items-center justify-between border-b border-sky-100 pb-2.5">
@@ -634,7 +638,7 @@ export const CompanySettings = () => {
                 </span>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 sm:gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     Account Holder Name
@@ -703,7 +707,7 @@ export const CompanySettings = () => {
             </div>
 
             {/* 4. Terms & Conditions Card */}
-            <div className={`water-glass rounded-2xl p-5 space-y-3.5 border border-sky-100 shadow-xs ${
+            <div className={`water-glass rounded-2xl p-3 sm:p-5 space-y-2 sm:space-y-3.5 border border-sky-100 shadow-xs ${
               mobileTab === 'terms' ? 'block' : 'hidden lg:block'
             }`}>
               <div className="flex items-center justify-between border-b border-sky-100 pb-2.5">
@@ -756,15 +760,15 @@ export const CompanySettings = () => {
               viewMode === 'split' ? 'lg:col-span-6 xl:col-span-5 2xl:col-span-6' : 'w-full max-w-4xl mx-auto'
             }`}
           >
-            <div className="sticky top-14 water-glass rounded-2xl p-3 shadow-md border border-sky-200/90 space-y-2.5">
+            <div className="sticky top-14 water-glass rounded-2xl p-2 sm:p-3 shadow-md border border-sky-200/90 space-y-1.5 sm:space-y-2.5">
               {/* Preview Bar Header */}
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sky-100 pb-2.5 px-1">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 shadow-xs">
-                    <Zap className="h-4 w-4" />
+              <div className="flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 border-b border-sky-100 pb-1.5 sm:pb-2.5 px-1">
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <div className="flex h-6 w-6 sm:h-7 sm:w-7 items-center justify-center rounded-lg sm:rounded-xl bg-emerald-100 text-emerald-700 shadow-xs">
+                    <Zap className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                   </div>
                   <div>
-                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                    <h3 className="text-[11px] sm:text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
                       <span>Live Invoice Preview</span>
                       <span className="flex h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
                     </h3>
@@ -837,15 +841,14 @@ export const CompanySettings = () => {
               </div>
 
               {/* Scrollable Printable Invoice Container */}
-              <div className="max-h-[calc(100vh-175px)] overflow-y-auto overflow-x-auto rounded-xl border border-sky-200/80 bg-slate-100/70 p-2 shadow-inner">
+              <div className="max-h-[calc(100vh-175px)] overflow-auto rounded-xl border border-sky-200/80 bg-slate-100/70 p-2 shadow-inner">
                 <div
-                  className="flex justify-center transition-transform duration-150 origin-top"
+                  className="flex sm:justify-center transition-transform duration-150 origin-top-left sm:origin-top"
                   style={{
                     transform: `scale(${zoomScale})`,
-                    transformOrigin: 'top center',
                   }}
                 >
-                  <div className="w-[740px] flex-shrink-0">
+                  <div className="w-[740px] flex-shrink-0 bg-white">
                     <PrintableInvoice invoice={previewInvoice} />
                   </div>
                 </div>

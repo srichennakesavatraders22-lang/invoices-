@@ -47,6 +47,50 @@ const productSchema = new mongoose.Schema(
       default: '18069010',
       trim: true,
     },
+    // ─── NEW: Stock Management ───
+    stock: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    minStock: {
+      type: Number,
+      default: 10,
+      min: 0,
+    },
+    // ─── NEW: Expiry Date ───
+    expiryDate: {
+      type: Date,
+      default: null,
+    },
+    // ─── NEW: Batch / Manufacturing ───
+    batchNumber: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    manufacturingDate: {
+      type: Date,
+      default: null,
+    },
+    // ─── NEW: Product Image ───
+    imageUrl: {
+      type: String,
+      default: '',
+    },
+    // ─── NEW: Supplier ───
+    supplierName: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    // ─── NEW: Discount ───
+    discountPercent: {
+      type: Number,
+      default: 0,
+      min: 0,
+      max: 100,
+    },
     isActive: {
       type: Boolean,
       default: true,

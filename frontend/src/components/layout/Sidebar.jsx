@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, Link } from 'react-router-dom';
 import {
   LayoutDashboard,
   FileText,
@@ -12,6 +12,7 @@ import {
   Lock,
   Unlock,
   X,
+  TrendingUp,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -20,6 +21,7 @@ const navItems = [
   { to: '/invoices', label: 'Invoices', icon: FileText },
   { to: '/products', label: 'Products & SKUs', icon: Package },
   { to: '/customers', label: 'Customers', icon: Users },
+  { to: '/expenses', label: 'Expenses', icon: TrendingUp },
   { to: '/settings', label: 'Company Profile', icon: Building2 },
 ];
 
@@ -55,10 +57,14 @@ export const Sidebar = ({ isOpen, onClose, isLocked, onToggleLock }) => {
         {/* Brand Header & Lock Toggle Control */}
         <div className="p-4 border-b border-sky-100/70">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-sky-400 via-teal-400 to-emerald-400 text-white shadow-md shadow-sky-500/20">
-                <ReceiptText className="h-5 w-5 stroke-[2.3]" />
-              </div>
+            {/* Logo — clickable Home link */}
+            <Link
+              to="/"
+              onClick={() => { if (!isLocked || (typeof window !== 'undefined' && window.innerWidth < 1024)) onClose(); }}
+              className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
+              title="Go to Dashboard"
+            >
+              <img src="/invoice_logo.png" alt="Sri Chenna Kesava Logo" className="h-9 w-auto object-contain drop-shadow-sm" />
               <div>
                 <h1 className="text-xs font-black tracking-tight text-slate-850 line-clamp-1">
                   SRI CHENNA KESAVA
@@ -68,7 +74,7 @@ export const Sidebar = ({ isOpen, onClose, isLocked, onToggleLock }) => {
                   Wholesale ERP
                 </p>
               </div>
-            </div>
+            </Link>
 
             {/* Close Toggle Button */}
             <button
