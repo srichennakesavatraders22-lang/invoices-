@@ -199,6 +199,10 @@ cron.schedule('0 9 * * *', async () => {
   }
 });
 
+app.get('/', (req, res) => {
+  res.status(200).send('Invoice API Server is awake and running.');
+});
+
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
