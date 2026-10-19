@@ -17,24 +17,23 @@ function fetchImage(url) {
 /**
  * Generates a print-ready PDF stream matching the Sri Chenna Kesava Traders invoice reference
  * @param {Object} invoice - Full invoice document with snapshot details
- * @param {Stream.Writable} res - HTTP response stream or file write stream
  */
 export async function generateInvoicePDF(invoice, res) {
   const doc = new PDFDocument({
     size: 'A4',
-    margin: 30,
+    margins: { top: 20, bottom: 10, left: 25, right: 25 },
     bufferPages: true,
   });
 
   doc.pipe(res);
 
-  const left = 30;
-  const right = 565; // A4 width is ~595.28, margin 30 => right is 565.28
-  const contentWidth = right - left; // 535
-  const top = 30;
+  const left = 25;
+  const right = 570; // A4 width is 595.28
+  const contentWidth = right - left; // 545
+  const top = 22;
 
   // Outer Border around entire invoice
-  const pageHeight = 770;
+  const pageHeight = 775;
   doc.rect(left, top, contentWidth, pageHeight).lineWidth(1).stroke('#222222');
 
   let currentY = top + 15;
@@ -155,34 +154,19 @@ export async function generateInvoicePDF(invoice, res) {
   currentY += colHeight;
   doc.moveTo(left, currentY).lineTo(right, currentY).lineWidth(0.8).stroke('#222222');
 
-  // 4. Line Items Table
-  // Columns: S.No (30), Item Name (180), Qty (Boxes) (55), MRP (Rs.) (65), CGST (Rs.) (65), IGST (Rs.) (65), Amount (Rs.) (75)
-  const totalCgst = invoice.totalCgst || 0;
-  const totalSgst = invoice.totalSgst || 0;
-  const totalIgst = invoice.totalIgst || 0;
-  let showCgst = totalCgst > 0;
-  let showSgst = totalSgst > 0;
-  let showIgst = totalIgst > 0;
-
-  if (!showCgst && !showSgst && !showIgst) {
-    if (invoice.customerSnapshot?.isInterState) showIgst = true;
-    else { showCgst = true; showSgst = true; }
-  }
-
   const cols = [
-    { id: 'sno', title: 'S.No', width: 32, align: 'center' },
-    { id: 'name', title: 'Item Name (SKU)', width: 178, align: 'left' },
-    { id: 'qty', title: 'Qty\n(Boxes)', width: 45, align: 'center' },
-    { id: 'mrp', title: 'MRP\n(Rs.)', width: 55, align: 'right' },
+    { id: 'sno', title: 'S.No', width: 28, align: 'center' },
+    { id: 'name', title: 'Item Name (SKU)', width: 195, align: 'left' },
+    { id: 'qty', title: 'Qty/Unit', width: 62, align: 'center' },
+    { id: 'mrp', title: 'Rate\n(Rs.)', width: 55, align: 'right' },
+    { id: 'taxable', title: 'Taxable\n(Rs.)', width: 65, align: 'right' },
+    { id: 'gst', title: 'GST\n(%)', width: 50, align: 'center' },
+    { id: 'amount', title: 'Amount\n(Rs.)', width: 90, align: 'right' },
   ];
-  if (showCgst) cols.push({ id: 'cgst', title: 'CGST\n(Rs.)', width: 55, align: 'right' });
-  if (showSgst) cols.push({ id: 'sgst', title: 'SGST\n(Rs.)', width: 55, align: 'right' });
-  if (showIgst) cols.push({ id: 'igst', title: 'IGST\n(Rs.)', width: 55, align: 'right' });
-  cols.push({ id: 'amount', title: 'Amount\n(Rs.)', width: 75, align: 'right' });
 
   const totalColsWidth = cols.reduce((sum, col) => sum + col.width, 0);
-  const diff = 550 - totalColsWidth;
-  if (diff > 0) {
+  const diff = contentWidth - totalColsWidth;
+  if (diff !== 0) {
     cols.find(c => c.id === 'name').width += diff;
   }
 
@@ -228,13 +212,16 @@ export async function generateInvoicePDF(invoice, res) {
 
     cols.forEach(col => {
       let val = '';
+      const unitLabel = item.sellUnit || item.unit || 'Box';
+      const formattedUnit = (unitLabel === 'Carton' || unitLabel === 'Cotton') ? 'Carton' : unitLabel === 'Piece' ? 'Pcs' : 'Boxes';
+      const taxable = item.taxableAmount !== undefined ? item.taxableAmount : (item.amount - (item.gstAmount || 0));
+
       if (col.id === 'sno') val = `${index + 1}`;
-      else if (col.id === 'name') val = item.itemName || '';
-      else if (col.id === 'qty') val = `${item.qty}`;
-      else if (col.id === 'mrp') val = Number(item.mrp).toFixed(2);
-      else if (col.id === 'cgst') val = item.cgstAmount && item.cgstAmount > 0 ? Number(item.cgstAmount).toFixed(2) : '-';
-      else if (col.id === 'sgst') val = item.sgstAmount && item.sgstAmount > 0 ? Number(item.sgstAmount).toFixed(2) : '-';
-      else if (col.id === 'igst') val = item.igstAmount && item.igstAmount > 0 ? Number(item.igstAmount).toFixed(2) : '-';
+      else if (col.id === 'name') val = item.itemName ? `${item.itemName}${item.packType ? ` (${item.packType})` : ''}` : '';
+      else if (col.id === 'qty') val = `${item.qty} ${formattedUnit}`;
+      else if (col.id === 'mrp') val = Number(item.unitPrice || item.mrp || 0).toFixed(2);
+      else if (col.id === 'taxable') val = Number(taxable || 0).toFixed(2);
+      else if (col.id === 'gst') val = `${item.gstPercent !== undefined ? item.gstPercent : 5}%`;
       else if (col.id === 'amount') val = Number(item.amount).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       
       const isLeft = col.align === 'left';
@@ -260,41 +247,37 @@ export async function generateInvoicePDF(invoice, res) {
 
   doc.moveTo(left, currentY).lineTo(right, currentY).lineWidth(0.8).stroke('#222222');
 
-  // 5. Sub Total Row
+  // 5. Sub Total (Original Price) Row
+  const lastColWidth = cols[cols.length - 1].width;
+  const labelWidth = contentWidth - lastColWidth;
+  const dividerX = left + labelWidth;
+
   const subTotalHeight = 18;
   doc.rect(left, currentY, contentWidth, subTotalHeight).fill('#f9fafb');
-
   doc.font('Helvetica-Bold').fontSize(8).fillColor('#111827');
-  
-  let subLabelWidth = 0;
-  for (let i = 0; i < cols.length; i++) {
-    if (['cgst', 'sgst', 'igst', 'amount'].includes(cols[i].id)) break;
-    subLabelWidth += cols[i].width;
-  }
-  
-  doc.text('Sub Total', left + 8, currentY + 5, { width: subLabelWidth - 16, align: 'right' });
+  doc.text('Sub Total (Original Price):', left + 8, currentY + 5, { width: labelWidth - 16, align: 'right' });
+  doc.moveTo(dividerX, currentY).lineTo(dividerX, currentY + subTotalHeight).lineWidth(0.5).stroke('#222222');
+  doc.text(
+    `Rs. ${Number(invoice.subTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
+    dividerX,
+    currentY + 5,
+    { width: lastColWidth - 6, align: 'right' }
+  );
 
-  let subX = left + subLabelWidth;
-  doc.moveTo(subX, currentY).lineTo(subX, currentY + subTotalHeight).lineWidth(0.5).stroke('#222222');
+  currentY += subTotalHeight;
+  doc.moveTo(left, currentY).lineTo(right, currentY).lineWidth(0.4).stroke('#e5e7eb');
 
-  for (let i = 0; i < cols.length; i++) {
-    const col = cols[i];
-    if (!['cgst', 'sgst', 'igst', 'amount'].includes(col.id)) continue;
-
-    let val = '';
-    if (col.id === 'cgst') val = Number(invoice.totalCgst || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
-    else if (col.id === 'sgst') val = Number(invoice.totalSgst || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
-    else if (col.id === 'igst') val = Number(invoice.totalIgst || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
-    else if (col.id === 'amount') val = Number(invoice.subTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 });
-
-    doc.text(val, subX, currentY + 5, { width: col.width - 6, align: 'right' });
-    subX += col.width;
-    
-    // Don't draw the final vertical line on the right edge, the outer border handles it
-    if (col.id !== 'amount') {
-      doc.moveTo(subX, currentY).lineTo(subX, currentY + subTotalHeight).lineWidth(0.5).stroke('#222222');
-    }
-  }
+  // 5b. Total GST (All Items in Rs)
+  doc.rect(left, currentY, contentWidth, subTotalHeight).fill('#f9fafb');
+  doc.font('Helvetica-Bold').fontSize(8).fillColor('#111827');
+  doc.text('Total GST (All Items):', left + 8, currentY + 5, { width: labelWidth - 16, align: 'right' });
+  doc.moveTo(dividerX, currentY).lineTo(dividerX, currentY + subTotalHeight).lineWidth(0.5).stroke('#222222');
+  doc.text(
+    `Rs. ${Number(invoice.totalGst || invoice.totalTax || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
+    dividerX,
+    currentY + 5,
+    { width: lastColWidth - 6, align: 'right' }
+  );
 
   currentY += subTotalHeight;
   doc.moveTo(left, currentY).lineTo(right, currentY).lineWidth(0.8).stroke('#222222');
@@ -302,13 +285,14 @@ export async function generateInvoicePDF(invoice, res) {
   // 6. Grand Total Row
   const grandTotalHeight = 20;
   doc.rect(left, currentY, contentWidth, grandTotalHeight).fill('#ffffff');
-  doc.font('Helvetica-Bold').fontSize(9).fillColor('#111827');
-  doc.text('Grand Total', left, currentY + 5, { width: contentWidth - 110, align: 'right' });
-  doc.text(
+  doc.font('Helvetica-Bold').fontSize(8.5).fillColor('#111827');
+  doc.text('GRAND TOTAL (INCL. GST):', left + 8, currentY + 5, { width: labelWidth - 16, align: 'right' });
+  doc.moveTo(dividerX, currentY).lineTo(dividerX, currentY + grandTotalHeight).lineWidth(0.5).stroke('#222222');
+  doc.font('Helvetica-Bold').fontSize(9).text(
     `Rs. ${Number(invoice.grandTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
-    right - 105,
+    dividerX,
     currentY + 5,
-    { width: 100, align: 'right' }
+    { width: lastColWidth - 6, align: 'right' }
   );
 
   currentY += grandTotalHeight;
@@ -425,11 +409,11 @@ export async function generateInvoicePDF(invoice, res) {
   doc.moveTo(right - 180, currentY + 55).lineTo(right - 10, currentY + 55).lineWidth(0.5).stroke('#6b7280');
   doc.fontSize(7.5).fillColor('#4b5563').text('Authorised Signatory & Stamp', rightSignX, currentY + 58, { width: 210, align: 'right' });
 
-  // 10. Computer generated invoice note at very bottom outside or inside border
-  doc.font('Helvetica-Oblique').fontSize(7.5).fillColor('#6b7280').text(
+  // 10. Computer generated invoice note at bottom
+  doc.font('Helvetica-Oblique').fontSize(7).fillColor('#6b7280').text(
     'This is a computer generated invoice and does not require a physical signature to be valid.',
     left,
-    pageHeight + 35,
+    top + pageHeight + 4,
     { align: 'center', width: contentWidth }
   );
 

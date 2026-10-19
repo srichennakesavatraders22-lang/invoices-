@@ -22,8 +22,9 @@ export const AuthProvider = ({ children }) => {
             localStorage.setItem('user', JSON.stringify(res.data));
           }
         } catch (error) {
-          console.error('Auth verification failed:', error);
-          logout();
+          // Do NOT logout on error — keep token in localStorage.
+          // Token is only removed when the user explicitly logs out.
+          console.warn('Auth verification failed (keeping session):', error);
         }
       }
       setLoading(false);

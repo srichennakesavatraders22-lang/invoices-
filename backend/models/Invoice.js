@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 
+// ─── INVOICE ITEM SCHEMA ──────────────────────────────────────────────────────
 const invoiceItemSchema = new mongoose.Schema({
   product: {
     type: mongoose.Schema.Types.ObjectId,
@@ -14,93 +15,57 @@ const invoiceItemSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
-  unit: {
+
+  // ─── Unit snapshot at time of invoice ───────────────────────────────────
+  // sellUnit: which unit was selected when selling (Carton / Box / Piece)
+  sellUnit: {
     type: String,
-    default: 'Boxes',
+    enum: ['Carton', 'Cotton', 'Box', 'Piece'],
+    default: 'Box',
   },
+  // qty is the count of sellUnit sold (e.g. 3 Cartons)
   qty: {
     type: Number,
     required: true,
     min: 1,
   },
-  mrp: {
-    type: Number,
-    required: true,
-    min: 0,
-  },
-  // ─── NEW: Discount per item ───
-  discountPercent: {
-    type: Number,
-    default: 0,
-    min: 0,
-    max: 100,
-  },
-  discountAmount: {
-    type: Number,
-    default: 0,
-  },
-  taxableAmount: {
-    type: Number,
-    required: true,
-    min: 0,
-  },
-  cgstPercent: {
-    type: Number,
-    default: 0,
-  },
-  sgstPercent: {
-    type: Number,
-    default: 0,
-  },
-  igstPercent: {
-    type: Number,
-    default: 0,
-  },
-  cgstAmount: {
-    type: Number,
-    default: 0,
-  },
-  sgstAmount: {
-    type: Number,
-    default: 0,
-  },
-  igstAmount: {
-    type: Number,
-    default: 0,
-  },
-  totalTaxAmount: {
-    type: Number,
-    default: 0,
-  },
-  amount: {
-    type: Number,
-    required: true,
-    min: 0,
-  },
+  // piecesPerBox and boxesPerCarton at the time of invoice (snapshot — immutable)
+  piecesPerBox: { type: Number, default: 1 },
+  boxesPerCarton: { type: Number, default: 1 },
+  boxesPerCotton: { type: Number, default: 1 },
+  // totalPiecesSold = computed pieces deducted from stock
+  totalPiecesSold: { type: Number, default: 0 },
+
+  // ─── Price snapshot at time of invoice (immutable) ──────────────────────
+  piecePrice: { type: Number, required: true, min: 0 },   // price per piece at sale time
+  unitPrice: { type: Number, required: true, min: 0 },    // price per sellUnit (piece/box/cotton) at sale time
+
+  // ─── Discount ────────────────────────────────────────────────────────────
+  discountPercent: { type: Number, default: 0, min: 0, max: 100 },
+  discountAmount: { type: Number, default: 0 },
+  taxableAmount: { type: Number, required: true, min: 0 },
+
+  // ─── GST (single, replaces CGST/SGST/IGST) ───────────────────────────────
+  gstPercent: { type: Number, default: 5 },
+  gstAmount: { type: Number, default: 0 },
+  totalTaxAmount: { type: Number, default: 0 },
+
+  amount: { type: Number, required: true, min: 0 },  // final line total incl. GST
 });
 
-// ─── NEW: Payment breakdown schema ───
+// ─── PAYMENT BREAKDOWN SCHEMA ─────────────────────────────────────────────────
 const paymentBreakdownSchema = new mongoose.Schema({
   method: {
     type: String,
     enum: ['Cash', 'UPI', 'Cheque', 'Bank Transfer', 'Credit'],
     required: true,
   },
-  amount: {
-    type: Number,
-    required: true,
-    min: 0,
-  },
-  reference: {
-    type: String,
-    default: '', // UPI txn ID, cheque number, etc.
-  },
-  paidAt: {
-    type: Date,
-    default: Date.now,
-  },
+  amount: { type: Number, required: true, min: 0 },
+  reference: { type: String, default: '' },
+  paidAt: { type: Date, default: Date.now },
 });
 
+// ─── INVOICE SCHEMA ───────────────────────────────────────────────────────────
 const invoiceSchema = new mongoose.Schema(
   {
     invoiceNumber: {
@@ -109,10 +74,7 @@ const invoiceSchema = new mongoose.Schema(
       unique: true,
       trim: true,
     },
-    sequenceNumber: {
-      type: Number,
-      required: true,
-    },
+    sequenceNumber: { type: Number, required: true },
     invoiceDate: {
       type: String,
       required: true,
@@ -125,18 +87,23 @@ const invoiceSchema = new mongoose.Schema(
     invoiceTime: {
       type: String,
       required: true,
-      default: () => new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
+      default: () =>
+        new Date().toLocaleTimeString('en-US', {
+          timeZone: 'Asia/Kolkata',
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        }),
     },
-    // ─── NEW: Due date ───
-    dueDate: {
-      type: Date,
-      default: null,
-    },
+    dueDate: { type: Date, default: null },
+
     customer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Customer',
       required: true,
     },
+
+    // ─── Snapshots (immutable — never change after creation) ──────────────
     customerSnapshot: {
       name: { type: String, required: true },
       businessName: { type: String, required: true },
@@ -165,91 +132,46 @@ const invoiceSchema = new mongoose.Schema(
       },
       termsAndConditions: [String],
     },
+
     items: [invoiceItemSchema],
-    totalQty: {
-      type: Number,
-      required: true,
-      default: 0,
-    },
-    subTotal: {
-      type: Number,
-      required: true,
-      default: 0,
-    },
-    // ─── NEW: Invoice-level discount ───
-    discountPercent: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 100,
-    },
-    discountAmount: {
-      type: Number,
-      default: 0,
-    },
-    totalCgst: {
-      type: Number,
-      default: 0,
-    },
-    totalSgst: {
-      type: Number,
-      default: 0,
-    },
-    totalIgst: {
-      type: Number,
-      default: 0,
-    },
-    totalTax: {
-      type: Number,
-      default: 0,
-    },
-    grandTotal: {
-      type: Number,
-      required: true,
-      default: 0,
-    },
-    amountInWords: {
-      type: String,
-      required: true,
-    },
+
+    // ─── Totals ────────────────────────────────────────────────────────────
+    totalQty: { type: Number, required: true, default: 0 },
+    subTotal: { type: Number, required: true, default: 0 },      // pre-tax total
+
+    // ─── Invoice-level discount ────────────────────────────────────────────
+    discountType: { type: String, enum: ['percentage', 'flat'], default: 'percentage' },
+    discountPercent: { type: Number, default: 0, min: 0, max: 100 },
+    discountAmount: { type: Number, default: 0 },
+
+    // ─── GST (single) ──────────────────────────────────────────────────────
+    totalGst: { type: Number, default: 0 },
+    totalTax: { type: Number, default: 0 },   // alias = totalGst (for compatibility)
+
+    grandTotal: { type: Number, required: true, default: 0 },
+    amountInWords: { type: String, required: true },
+
+    // ─── Payment ───────────────────────────────────────────────────────────
     status: {
       type: String,
       enum: ['Draft', 'Sent', 'Paid', 'Overdue', 'Cancelled'],
       default: 'Sent',
     },
-    // ─── NEW: Payment method (primary) ───
     paymentMethod: {
       type: String,
       enum: ['Cash', 'UPI', 'Cheque', 'Bank Transfer', 'Credit', 'Mixed', ''],
       default: '',
     },
-    // ─── NEW: Mixed payment breakdown ───
     paymentBreakdown: [paymentBreakdownSchema],
-    // ─── NEW: Amount paid so far ───
-    amountPaid: {
-      type: Number,
-      default: 0,
-    },
-    paymentDate: {
-      type: Date,
-    },
-    notes: {
-      type: String,
-      default: '',
-    },
-    // ─── NEW: Transport details ───
-    transportMode: {
-      type: String,
-      default: '',
-    },
-    vehicleNumber: {
-      type: String,
-      default: '',
-    },
-    lrNumber: {
-      type: String,
-      default: '',
-    },
+    amountPaid: { type: Number, default: 0 },
+    paymentDate: { type: Date },
+
+    notes: { type: String, default: '' },
+
+    // ─── Transport ─────────────────────────────────────────────────────────
+    transportMode: { type: String, default: '' },
+    vehicleNumber: { type: String, default: '' },
+    lrNumber: { type: String, default: '' },
   },
   { timestamps: true }
 );

@@ -2,13 +2,26 @@ import Product from '../models/Product.js';
 import numberToWordsIndian from './amountInWords.js';
 
 /**
- * Recalculate invoice items and totals strictly from database product data
- * Supports per-item discount and invoice-level discount
- * @param {Array} rawItems - array of { product: productId, qty: number, discountPercent?: number }
- * @param {Boolean} isInterState - true if inter-state (IGST), false if intra-state (CGST / SGST)
- * @param {Number} invoiceDiscountPercent - invoice-level discount %
+ * Recalculate invoice items with Cotton / Box / Piece unit support + single GST
+ *
+ * Each rawItem:
+ *   {
+ *     product: <productId>,
+ *     qty: <number>,           — count of sellUnit
+ *     sellUnit: 'Cotton'|'Box'|'Piece',
+ *     discountPercent?: number
+ *   }
+ *
+ * Stock is always reduced in PIECES regardless of sellUnit.
+ * Past invoices are immutable — this always reads fresh product data for new invoices.
  */
-export async function recalculateInvoice(rawItems, isInterState = false, invoiceDiscountPercent = 0) {
+export async function recalculateInvoice(
+  rawItems,
+  _isInterState = false,
+  invoiceDiscountPercent = 0,
+  invoiceDiscountType = 'percentage',
+  invoiceDiscountAmount = 0
+) {
   if (!Array.isArray(rawItems) || rawItems.length === 0) {
     throw new Error('At least one item is required to generate an invoice');
   }
@@ -16,9 +29,7 @@ export async function recalculateInvoice(rawItems, isInterState = false, invoice
   const calculatedItems = [];
   let totalQty = 0;
   let subTotal = 0;
-  let totalCgst = 0;
-  let totalSgst = 0;
-  let totalIgst = 0;
+  let totalGst = 0;
   let totalDiscountAmount = 0;
 
   for (const item of rawItems) {
@@ -27,102 +38,105 @@ export async function recalculateInvoice(rawItems, isInterState = false, invoice
       throw new Error(`Invalid quantity for item ${item.product || item.itemName}`);
     }
 
-    // Fetch authoritative product from DB
+    // Always fetch authoritative product from DB (price snapshot for this invoice)
     const dbProduct = await Product.findById(item.product);
     if (!dbProduct) {
       throw new Error(`Product with ID ${item.product} not found`);
     }
 
-    const mrp = Number(dbProduct.mrp);
-    const grossAmount = Number((qty * mrp).toFixed(2));
+    const piecePrice    = (item.piecePrice !== undefined && item.piecePrice !== '' && !isNaN(Number(item.piecePrice)))
+      ? Number(item.piecePrice)
+      : Number(dbProduct.piecePrice);
+    const piecesPerBox  = Number(dbProduct.piecesPerBox || 1);
+    const boxesPerCarton = Number(dbProduct.boxesPerCarton || dbProduct.boxesPerCotton || 1);
+
+    // Calculate unit price and total pieces based on sellUnit
+    let sellUnit = item.sellUnit || 'Box';
+    if (sellUnit === 'Cotton') sellUnit = 'Carton';
+
+    let unitPrice = piecePrice;
+    let totalPiecesSold = qty;
+
+    if (sellUnit === 'Box') {
+      unitPrice = Number((piecePrice * piecesPerBox).toFixed(2));
+      totalPiecesSold = qty * piecesPerBox;
+    } else if (sellUnit === 'Carton') {
+      unitPrice = Number((piecePrice * piecesPerBox * boxesPerCarton).toFixed(2));
+      totalPiecesSold = qty * piecesPerBox * boxesPerCarton;
+    }
+    // sellUnit === 'Piece' → unitPrice = piecePrice, totalPiecesSold = qty
+
+    const grossAmount = Number((qty * unitPrice).toFixed(2));
 
     // Per-item discount
     const itemDiscountPercent = Number(item.discountPercent || 0);
-    const itemDiscountAmount = Number(((grossAmount * itemDiscountPercent) / 100).toFixed(2));
-    const taxableAmount = Number((grossAmount - itemDiscountAmount).toFixed(2));
+    const itemDiscountAmount  = Number(((grossAmount * itemDiscountPercent) / 100).toFixed(2));
+    const taxableAmount       = Number((grossAmount - itemDiscountAmount).toFixed(2));
 
-    let cp = parseFloat(dbProduct.cgstPercent) || 0;
-    let sp = parseFloat(dbProduct.sgstPercent) || 0;
-    let ip = parseFloat(dbProduct.igstPercent) || 0;
+    // Single GST
+    const gstPercent = Number(dbProduct.gstPercent ?? 5);
+    const gstAmount  = Number(((taxableAmount * gstPercent) / 100).toFixed(2));
+    const totalTaxAmount = gstAmount;
 
-    if (cp === 0 && sp === 0 && ip === 0) {
-      cp = 2.5; sp = 2.5; ip = 5.0;
-    }
-
-    let useIgst = isInterState;
-    if (ip === 0 && (cp > 0 || sp > 0)) useIgst = false;
-    else if (cp === 0 && sp === 0 && ip > 0) useIgst = true;
-
-    let cgstPercent = 0;
-    let sgstPercent = 0;
-    let igstPercent = 0;
-
-    let cgstAmount = 0;
-    let sgstAmount = 0;
-    let igstAmount = 0;
-
-    if (useIgst) {
-      igstPercent = ip;
-      igstAmount = Number(((taxableAmount * igstPercent) / 100).toFixed(2));
-    } else {
-      cgstPercent = cp;
-      sgstPercent = sp;
-      cgstAmount = Number(((taxableAmount * cgstPercent) / 100).toFixed(2));
-      sgstAmount = Number(((taxableAmount * sgstPercent) / 100).toFixed(2));
-    }
-
-    const totalTaxAmount = Number((cgstAmount + sgstAmount + igstAmount).toFixed(2));
     const lineAmount = Number((taxableAmount + totalTaxAmount).toFixed(2));
 
     calculatedItems.push({
-      product: dbProduct._id,
-      itemName: dbProduct.name,
-      packType: dbProduct.packType,
-      unit: dbProduct.unit || 'Boxes',
+      product:         dbProduct._id,
+      itemName:        dbProduct.name,
+      packType:        dbProduct.packType,
+      sellUnit,
       qty,
-      mrp,
-      discountPercent: itemDiscountPercent,
-      discountAmount: itemDiscountAmount,
+      piecesPerBox,
+      boxesPerCarton,
+      boxesPerCotton:  boxesPerCarton,
+      totalPiecesSold,
+      piecePrice,
+      unitPrice,
+      discountPercent:  itemDiscountPercent,
+      discountAmount:   itemDiscountAmount,
       taxableAmount,
-      cgstPercent,
-      sgstPercent,
-      igstPercent,
-      cgstAmount,
-      sgstAmount,
-      igstAmount,
+      gstPercent,
+      gstAmount,
       totalTaxAmount,
       amount: lineAmount,
     });
 
-    totalQty += qty;
-    subTotal += taxableAmount;
-    totalCgst += cgstAmount;
-    totalSgst += sgstAmount;
-    totalIgst += igstAmount;
+    totalQty           += qty;
+    subTotal           += taxableAmount;
+    totalGst           += gstAmount;
     totalDiscountAmount += itemDiscountAmount;
   }
 
   subTotal = Number(subTotal.toFixed(2));
-  totalCgst = Number(totalCgst.toFixed(2));
-  totalSgst = Number(totalSgst.toFixed(2));
-  totalIgst = Number(totalIgst.toFixed(2));
-  const totalTax = Number((totalCgst + totalSgst + totalIgst).toFixed(2));
+  totalGst = Number(totalGst.toFixed(2));
+  const totalTax = totalGst;
 
-  // Invoice-level discount applied after items subtotal + tax
-  const invoiceDiscount = Number(invoiceDiscountPercent || 0);
-  const invoiceDiscountAmt = Number(((subTotal + totalTax) * invoiceDiscount / 100).toFixed(2));
+  // Invoice-level discount (applied after sub + tax)
+  const totalBeforeDiscount = Number((subTotal + totalGst).toFixed(2));
+  let invoiceDiscountAmt = 0;
+  let invoiceDiscount = Number(invoiceDiscountPercent || 0);
 
-  const grandTotal = Number((subTotal + totalTax - invoiceDiscountAmt).toFixed(2));
+  if (invoiceDiscountType === 'flat') {
+    invoiceDiscountAmt = Math.min(totalBeforeDiscount, Math.max(0, Number(invoiceDiscountAmount || 0)));
+    invoiceDiscountAmt = Number(invoiceDiscountAmt.toFixed(2));
+    invoiceDiscount = totalBeforeDiscount > 0
+      ? Number(((invoiceDiscountAmt / totalBeforeDiscount) * 100).toFixed(2))
+      : 0;
+  } else {
+    invoiceDiscount = Math.min(100, Math.max(0, invoiceDiscount));
+    invoiceDiscountAmt = Number(((totalBeforeDiscount * invoiceDiscount) / 100).toFixed(2));
+  }
+
+  const grandTotal = Math.max(0, Number((totalBeforeDiscount - invoiceDiscountAmt).toFixed(2)));
   const amountInWords = numberToWordsIndian(grandTotal);
 
   return {
     items: calculatedItems,
     totalQty,
     subTotal,
-    totalCgst,
-    totalSgst,
-    totalIgst,
+    totalGst,
     totalTax,
+    discountType: invoiceDiscountType || 'percentage',
     discountPercent: invoiceDiscount,
     discountAmount: Number((totalDiscountAmount + invoiceDiscountAmt).toFixed(2)),
     grandTotal,

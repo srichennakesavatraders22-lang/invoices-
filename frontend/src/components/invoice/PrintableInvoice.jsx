@@ -29,22 +29,8 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
         '5. This is a computer generated invoice.',
       ];
 
-  const totalCgst = invoice.totalCgst || 0;
-  const totalSgst = invoice.totalSgst || 0;
-  const totalIgst = invoice.totalIgst || 0;
-  const hasItems = items.length > 0;
-  const isInterState = invoice.customerSnapshot?.isInterState || false;
-
-  let showCgst = totalCgst > 0;
-  let showSgst = totalSgst > 0;
-  let showIgst = totalIgst > 0;
-
-  if (!showCgst && !showSgst && !showIgst) {
-    if (isInterState) showIgst = true;
-    else { showCgst = true; showSgst = true; }
-  }
-
-  const colSpanCount = 4 + (showCgst ? 1 : 0) + (showSgst ? 1 : 0) + (showIgst ? 1 : 0);
+  const totalGst = invoice.totalGst || invoice.totalTax || 0;
+  const colSpanCount = 5;
 
   return (
     <div
@@ -160,19 +146,24 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
               <tr className="border-b-[1.5px] border-black bg-neutral-100 font-bold text-black">
                 <th className="border-r-[1px] border-black py-1 px-1 w-6">S.No</th>
                 <th className="border-r-[1px] border-black py-1 px-1.5 text-left">Item Name (SKU)</th>
-                <th className="border-r-[1px] border-black py-1 px-1 w-12">Qty<br />(Boxes)</th>
-                <th className="border-r-[1px] border-black py-1 px-1 text-right w-12">MRP<br />(Rs.)</th>
-                {showCgst && <th className="border-r-[1px] border-black py-1 px-1 text-right w-12">CGST<br />(Rs.)</th>}
-                {showSgst && <th className="border-r-[1px] border-black py-1 px-1 text-right w-12">SGST<br />(Rs.)</th>}
-                {showIgst && <th className="border-r-[1px] border-black py-1 px-1 text-right w-12">IGST<br />(Rs.)</th>}
+                <th className="border-r-[1px] border-black py-1 px-1 w-16">Qty & Unit</th>
+                <th className="border-r-[1px] border-black py-1 px-1 text-right w-14">Rate/Unit<br />(Rs.)</th>
+                <th className="border-r-[1px] border-black py-1 px-1 text-right w-14">Taxable<br />(Rs.)</th>
+                <th className="border-r-[1px] border-black py-1 px-1 text-center w-12">GST<br />(%)</th>
                 <th className="py-1 px-1.5 text-right w-20">Amount<br />(Rs.)</th>
               </tr>
             </thead>
             <tbody>
               {items.map((item, index) => {
-                const cgstFormatted = item.cgstAmount > 0 ? formatINR(item.cgstAmount) : '-';
-                const sgstFormatted = item.sgstAmount > 0 ? formatINR(item.sgstAmount) : '-';
-                const igstFormatted = item.igstAmount > 0 ? formatINR(item.igstAmount) : '-';
+                const unitLabel = item.sellUnit || item.unit || 'Box';
+                const formattedUnit = (unitLabel === 'Carton' || unitLabel === 'Cotton') 
+                  ? 'Carton' 
+                  : unitLabel === 'Piece' 
+                  ? 'Pcs' 
+                  : 'Boxes';
+                const rate = item.unitPrice ?? item.mrp ?? 0;
+                const taxable = item.taxableAmount !== undefined ? item.taxableAmount : (item.amount - (item.gstAmount || 0));
+                const gstRate = item.gstPercent !== undefined ? item.gstPercent : 5;
 
                 return (
                   <tr
@@ -181,29 +172,20 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
                   >
                     <td className="border-r-[1px] border-black py-0.5 px-1">{index + 1}</td>
                     <td className="border-r-[1px] border-black py-0.5 px-1.5 text-left font-medium">
-                      {item.itemName}
+                      {item.itemName} {item.packType ? `(${item.packType})` : ''}
                     </td>
-                    <td className="border-r-[1px] border-black py-0.5 px-1 font-semibold">
-                      {item.qty}
+                    <td className="border-r-[1px] border-black py-0.5 px-1 font-semibold whitespace-nowrap">
+                      {item.qty} {formattedUnit}
                     </td>
                     <td className="border-r-[1px] border-black py-0.5 px-1 text-right font-mono whitespace-nowrap">
-                      {formatINR(item.mrp)}
+                      {formatINR(rate)}
                     </td>
-                    {showCgst && (
-                      <td className="border-r-[1px] border-black py-0.5 px-1 text-right font-mono whitespace-nowrap">
-                        {cgstFormatted}
-                      </td>
-                    )}
-                    {showSgst && (
-                      <td className="border-r-[1px] border-black py-0.5 px-1 text-right font-mono whitespace-nowrap">
-                        {sgstFormatted}
-                      </td>
-                    )}
-                    {showIgst && (
-                      <td className="border-r-[1px] border-black py-0.5 px-1 text-right font-mono whitespace-nowrap">
-                        {igstFormatted}
-                      </td>
-                    )}
+                    <td className="border-r-[1px] border-black py-0.5 px-1 text-right font-mono whitespace-nowrap">
+                      {formatINR(taxable)}
+                    </td>
+                    <td className="border-r-[1px] border-black py-0.5 px-1 text-center font-mono font-medium whitespace-nowrap">
+                      {gstRate}%
+                    </td>
                     <td className="py-0.5 px-1.5 text-right font-mono font-medium whitespace-nowrap">
                       {formatINR(item.amount)}
                     </td>
@@ -211,35 +193,42 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
                 );
               })}
 
-              {/* Sub Total Row */}
-              <tr className="border-b-[1.5px] border-black bg-neutral-100 font-bold text-[10px]">
-                <td colSpan={4} className="border-r-[1px] border-black py-1 px-2 text-right">
-                  Sub Total
+              {/* Sub Total (Taxable Original Price) */}
+              <tr className="border-b-[1px] border-black bg-neutral-100 font-bold text-[9.5px]">
+                <td colSpan={6} className="border-r-[1px] border-black py-1 px-2 text-right">
+                  Sub Total (Original Price):
                 </td>
-                {showCgst && (
-                  <td className="border-r-[1px] border-black py-1 px-1 text-right font-mono whitespace-nowrap">
-                    {formatINR(invoice.totalCgst)}
-                  </td>
-                )}
-                {showSgst && (
-                  <td className="border-r-[1px] border-black py-1 px-1 text-right font-mono whitespace-nowrap">
-                    {formatINR(invoice.totalSgst)}
-                  </td>
-                )}
-                {showIgst && (
-                  <td className="border-r-[1px] border-black py-1 px-1 text-right font-mono whitespace-nowrap">
-                    {formatINR(invoice.totalIgst)}
-                  </td>
-                )}
                 <td className="py-1 px-1.5 text-right font-mono whitespace-nowrap">
-                  {formatINR(invoice.subTotal)}
+                  Rs. {formatINR(invoice.subTotal)}
                 </td>
               </tr>
 
+              {/* Total GST in Rupees */}
+              <tr className="border-b-[1px] border-black bg-neutral-100 font-bold text-[9.5px]">
+                <td colSpan={6} className="border-r-[1px] border-black py-1 px-2 text-right">
+                  Total GST (All Items):
+                </td>
+                <td className="py-1 px-1.5 text-right font-mono text-slate-800 whitespace-nowrap">
+                  Rs. {formatINR(totalGst)}
+                </td>
+              </tr>
+
+              {/* Discount Row (Percentage or Flat) */}
+              {(Number(invoice.discountAmount || 0) > 0 || Number(invoice.discountPercent || 0) > 0) && (
+                <tr className="border-b-[1px] border-black bg-neutral-100 font-bold text-[9.5px]">
+                  <td colSpan={6} className="border-r-[1px] border-black py-1 px-2 text-right text-emerald-800">
+                    Discount {invoice.discountType === 'flat' ? '(Flat)' : `(${invoice.discountPercent || 0}%)`}:
+                  </td>
+                  <td className="py-1 px-1.5 text-right font-mono text-emerald-800 font-bold whitespace-nowrap">
+                    - Rs. {formatINR(invoice.discountAmount || (Number(invoice.subTotal + totalGst) * (Number(invoice.discountPercent || 0) / 100)))}
+                  </td>
+                </tr>
+              )}
+
               {/* Grand Total Row */}
               <tr className="border-b-[1.5px] border-black font-bold text-[10.5px] bg-neutral-50">
-                <td colSpan={colSpanCount} className="border-r-[1px] border-black py-1 px-2 text-right uppercase tracking-wider">
-                  Grand Total
+                <td colSpan={6} className="border-r-[1px] border-black py-1 px-2 text-right uppercase tracking-wider">
+                  Grand Total (Incl. GST):
                 </td>
                 <td className="py-1 px-1.5 text-right font-mono text-black font-black whitespace-nowrap">
                   Rs. {formatINR(invoice.grandTotal)}

@@ -175,25 +175,25 @@ export const Dashboard = () => {
 
   const statCards = [
     {
-      title: `Invoiced (${dateLabel})`,
-      value: `Rs. ${formatINR(stats?.totalInvoicedThisMonth)}`,
-      subtext: `${stats?.thisMonthCount || 0} invoices generated`,
+      title: `Realized Sales (${dateLabel})`,
+      value: `Rs. ${formatINR(stats?.settledOriginalAmount || 0)}`,
+      subtext: `Tax: Rs. ${formatINR(stats?.settledTaxAmount || 0)} | ${stats?.settledCount || 0} paid`,
       icon: TrendingUp,
       gradient: 'from-emerald-400 via-teal-400 to-cyan-500',
       textColor: 'text-emerald-700',
     },
     {
       title: `Pending Receivables (${dateLabel})`,
-      value: `Rs. ${formatINR(stats?.outstandingAmount)}`,
-      subtext: `${stats?.pendingInvoicesCount || 0} unpaid / draft invoices`,
+      value: `Rs. ${formatINR(stats?.outstandingAmount || 0)}`,
+      subtext: `Base: Rs. ${formatINR(stats?.outstandingOriginalAmount || 0)} | Tax: Rs. ${formatINR(stats?.outstandingTaxAmount || 0)}`,
       icon: Clock,
       gradient: 'from-amber-400 to-orange-400',
       textColor: 'text-amber-700',
     },
     {
-      title: `Invoices Issued (${dateLabel})`,
-      value: stats?.totalInvoicesCount || 0,
-      subtext: `${stats?.totalPaidInvoices || 0} settled & paid`,
+      title: `Total Invoiced (${dateLabel})`,
+      value: `Rs. ${formatINR(stats?.totalInvoicedThisMonth || 0)}`,
+      subtext: `Original: Rs. ${formatINR(stats?.invoicedOriginalAmount || 0)} | GST: Rs. ${formatINR(stats?.invoicedTaxAmount || 0)}`,
       icon: FileText,
       gradient: 'from-sky-400 to-blue-500',
       textColor: 'text-sky-700',
@@ -201,7 +201,7 @@ export const Dashboard = () => {
     {
       title: 'Total Stock Value (Current)',
       value: `Rs. ${formatINR(stats?.totalStockValue)}`,
-      subtext: `${stats?.totalStock || 0} total boxes in stock`,
+      subtext: `${stats?.totalStock || 0} total pieces in stock`,
       icon: Package,
       gradient: 'from-indigo-400 to-purple-400',
       textColor: 'text-indigo-700',
@@ -434,10 +434,34 @@ export const Dashboard = () => {
                       <XAxis dataKey="month" tick={{ fontSize: 9, fill: '#64748b' }} interval={0} angle={analytics.monthlyData.length > 8 ? -30 : 0} textAnchor={analytics.monthlyData.length > 8 ? 'end' : 'middle'} height={analytics.monthlyData.length > 8 ? 40 : 20} />
                       <YAxis tickFormatter={formatShortINR} tick={{ fontSize: 10, fill: '#64748b' }} />
                       <Tooltip
-                        formatter={(value) => [`Rs. ${formatINR(value)}`, 'Revenue']}
-                        contentStyle={{ fontSize: 11, borderRadius: 10, border: '1px solid #e0f2fe' }}
+                        content={({ active, payload, label }) => {
+                          if (active && payload && payload.length) {
+                            const data = payload[0].payload;
+                            return (
+                              <div className="rounded-xl border border-sky-150 bg-white/95 p-2.5 shadow-md text-xs space-y-1 font-sans">
+                                <p className="font-bold text-slate-800 border-b border-sky-100 pb-1">{label}</p>
+                                <p className="text-slate-600 flex justify-between gap-3">
+                                  <span>Original Price (Sales):</span>
+                                  <b className="font-mono text-slate-900">Rs. {formatINR(data.originalRevenue || 0)}</b>
+                                </p>
+                                <p className="text-slate-600 flex justify-between gap-3">
+                                  <span>GST (Tax):</span>
+                                  <b className="font-mono text-sky-700">Rs. {formatINR(data.taxAmount || 0)}</b>
+                                </p>
+                                <p className="text-slate-800 font-extrabold flex justify-between gap-3 pt-1 border-t border-slate-100">
+                                  <span>Total (with GST):</span>
+                                  <span className="font-mono text-teal-700">Rs. {formatINR(data.revenue || 0)}</span>
+                                </p>
+                                <p className="text-[10px] text-slate-400 mt-0.5">
+                                  Settled/Paid: <b className="text-emerald-600">Rs. {formatINR(data.settledRevenue || 0)}</b> ({data.paidCount || 0}/{data.invoiceCount || 0} paid)
+                                </p>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
                       />
-                      <Bar dataKey="revenue" radius={[6, 6, 0, 0]} maxBarSize={50}>
+                      <Bar dataKey="originalRevenue" name="Original Price (Sales)" radius={[6, 6, 0, 0]} maxBarSize={50}>
                         {analytics.monthlyData.map((_, i) => (
                           <Cell key={i} fill={`url(#barColor${i})`} />
                         ))}
@@ -726,7 +750,7 @@ export const Dashboard = () => {
                   <div key={p._id} className="flex items-center justify-between rounded-xl bg-orange-50/60 p-2.5 border border-orange-100 shadow-xs">
                     <div>
                       <p className="text-xs font-bold text-slate-900">{p.name}</p>
-                      <p className="text-[10px] text-slate-500">{p.stock} {p.unit} in stock</p>
+                      <p className="text-[10px] text-slate-500">{p.stockPieces ?? p.stock ?? 0} pcs in stock</p>
                     </div>
                     <ExpiryBadge days={daysLeft} />
                   </div>
@@ -752,18 +776,23 @@ export const Dashboard = () => {
           </div>
           <div className="flex-1 overflow-y-auto min-h-[200px] space-y-2">
             {stats?.lowStockProducts?.length > 0 ? (
-              stats.lowStockProducts.map((p) => (
-                <div key={p._id} className="flex items-center justify-between rounded-xl bg-yellow-50/60 p-2.5 border border-yellow-100 shadow-xs">
-                  <div>
-                    <p className="text-xs font-bold text-slate-900">{p.name}</p>
-                    <p className="text-[10px] text-slate-500">Min: {p.minStock} {p.unit}</p>
-                  </div>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${p.stock === 0 ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
+              stats.lowStockProducts.map((p) => {
+                const pieces = p.stockPieces ?? p.stock ?? 0;
+                const minPieces = p.minStockPieces ?? p.minStock ?? 10;
+                return (
+                  <div key={p._id} className="flex items-center justify-between rounded-xl bg-yellow-50/60 p-2.5 border border-yellow-100 shadow-xs">
+                    <div>
+                      <p className="text-xs font-bold text-slate-900">{p.name}</p>
+                      <p className="text-[10px] text-slate-500">Min: {minPieces} pcs</p>
+                    </div>
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
+                      pieces === 0 ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
                     }`}>
-                    {p.stock === 0 ? 'OUT' : p.stock} {p.unit}
-                  </span>
-                </div>
-              ))
+                      {pieces === 0 ? 'OUT' : `${pieces} pcs`}
+                    </span>
+                  </div>
+                );
+              })
             ) : (
               <p className="py-4 text-center text-xs text-slate-400 font-medium">Stock levels are healthy</p>
             )}

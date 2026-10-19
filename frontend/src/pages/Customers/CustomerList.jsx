@@ -298,11 +298,11 @@ export const CustomerList = () => {
                     <div className="flex items-center gap-2">
                       {cust.isInterState ? (
                         <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                          IGST (Interstate)
+                          Interstate (GST)
                         </span>
                       ) : (
                         <span className="rounded-md bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
-                          CGST (Intrastate)
+                          Intrastate (GST)
                         </span>
                       )}
                       <span className="font-mono text-[10px] text-slate-500">
@@ -378,11 +378,11 @@ export const CustomerList = () => {
                     <td className="py-3.5">
                       {cust.isInterState ? (
                         <span className="inline-block rounded-md bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-800 border border-amber-200">
-                          Interstate (IGST)
+                          Interstate (GST)
                         </span>
                       ) : (
                         <span className="inline-block rounded-md bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-800 border border-emerald-200">
-                          Intrastate (CGST+SGST)
+                          Intrastate (GST)
                         </span>
                       )}
                     </td>

@@ -13,20 +13,22 @@ const formatInvoiceNumber = (prefix, seq) => {
   return `${prefix || 'SCKT/2026-27/'}${padded}`;
 };
 
-// Helper: decrement stock for all items in an invoice
+// Helper: decrement stock (in PIECES) for all items in an invoice
 const decrementStock = async (items) => {
   for (const item of items) {
+    const piecesToDeduct = item.totalPiecesSold || item.qty;
     await Product.findByIdAndUpdate(item.product, {
-      $inc: { stock: -item.qty },
+      $inc: { stockPieces: -piecesToDeduct },
     });
   }
 };
 
-// Helper: restore stock when invoice is deleted/cancelled
+// Helper: restore stock (in PIECES) when invoice is deleted/cancelled
 const restoreStock = async (items) => {
   for (const item of items) {
+    const piecesToRestore = item.totalPiecesSold || item.qty;
     await Product.findByIdAndUpdate(item.product, {
-      $inc: { stock: item.qty },
+      $inc: { stockPieces: piecesToRestore },
     });
   }
 };
@@ -96,7 +98,8 @@ export const createInvoice = async (req, res, next) => {
       customerId, items, notes, status = 'Sent',
       invoiceDate, invoiceTime, shippingAddress,
       paymentMethod, paymentBreakdown, dueDate,
-      discountPercent, transportMode, vehicleNumber, lrNumber,
+      discountPercent, discountType = 'percentage', discountAmount = 0,
+      transportMode, vehicleNumber, lrNumber,
     } = req.body;
 
     if (!customerId) {
@@ -116,7 +119,13 @@ export const createInvoice = async (req, res, next) => {
 
     const isInterState = Boolean(customer.isInterState);
     const invoiceDiscount = Number(discountPercent || 0);
-    const calculation = await recalculateInvoice(items, isInterState, invoiceDiscount);
+    const calculation = await recalculateInvoice(
+      items,
+      isInterState,
+      invoiceDiscount,
+      discountType,
+      discountAmount
+    );
 
     // ─── Generate invoice number with retry on duplicate ──────────────────────
     let invoiceNumber = '';
@@ -199,10 +208,9 @@ export const createInvoice = async (req, res, next) => {
       items: calculation.items,
       totalQty: calculation.totalQty,
       subTotal: calculation.subTotal,
-      totalCgst: calculation.totalCgst,
-      totalSgst: calculation.totalSgst,
-      totalIgst: calculation.totalIgst,
+      totalGst: calculation.totalGst,
       totalTax: calculation.totalTax,
+      discountType: calculation.discountType || discountType || 'percentage',
       discountPercent: calculation.discountPercent,
       discountAmount: calculation.discountAmount,
       grandTotal: calculation.grandTotal,
@@ -285,8 +293,10 @@ export const updateInvoice = async (req, res, next) => {
     }
 
     if (items && Array.isArray(items) && items.length > 0) {
-      const invoiceDiscount = Number(discountPercent || invoice.discountPercent || 0);
-      const calculation = await recalculateInvoice(items, isInterState, invoiceDiscount);
+      const effDiscountType = req.body.discountType !== undefined ? req.body.discountType : (invoice.discountType || 'percentage');
+      const invoiceDiscount = Number(discountPercent !== undefined ? discountPercent : (invoice.discountPercent || 0));
+      const invoiceDiscountAmt = Number(req.body.discountAmount !== undefined ? req.body.discountAmount : (invoice.discountAmount || 0));
+      const calculation = await recalculateInvoice(items, isInterState, invoiceDiscount, effDiscountType, invoiceDiscountAmt);
 
       // Restore old stock, then deduct new stock
       if (wasNonDraft) await restoreStock(oldItems);
@@ -294,10 +304,9 @@ export const updateInvoice = async (req, res, next) => {
       invoice.items = calculation.items;
       invoice.totalQty = calculation.totalQty;
       invoice.subTotal = calculation.subTotal;
-      invoice.totalCgst = calculation.totalCgst;
-      invoice.totalSgst = calculation.totalSgst;
-      invoice.totalIgst = calculation.totalIgst;
+      invoice.totalGst = calculation.totalGst;
       invoice.totalTax = calculation.totalTax;
+      invoice.discountType = calculation.discountType || effDiscountType;
       invoice.discountPercent = calculation.discountPercent;
       invoice.discountAmount = calculation.discountAmount;
       invoice.grandTotal = calculation.grandTotal;
@@ -457,12 +466,9 @@ export const exportInvoicesExcel = async (req, res, next) => {
       'Mobile': inv.customerSnapshot?.mobile,
       'Billing Address': inv.customerSnapshot?.billingAddress,
       'GSTIN': inv.customerSnapshot?.gstin,
-      'Total Boxes': inv.totalQty,
+      'Total Qty': inv.totalQty,
       'Sub Total (Rs.)': inv.subTotal,
-      'CGST (Rs.)': inv.totalCgst,
-      'SGST (Rs.)': inv.totalSgst,
-      'IGST (Rs.)': inv.totalIgst,
-      'Tax Total (Rs.)': inv.totalTax,
+      'GST (Rs.)': inv.totalGst || inv.totalTax || 0,
       'Discount (Rs.)': inv.discountAmount || 0,
       'Grand Total (Rs.)': inv.grandTotal,
       'Payment Method': inv.paymentMethod || '',

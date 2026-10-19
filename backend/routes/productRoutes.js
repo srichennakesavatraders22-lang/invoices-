@@ -11,6 +11,8 @@ import {
   exportProductsExcel,
   bulkImportProducts,
   downloadImportTemplate,
+  downloadSampleProducts,
+  bulkDeleteProducts,
 } from '../controllers/productController.js';
 import { protect, authorize } from '../middleware/auth.js';
 
@@ -21,8 +23,10 @@ router.route('/')
   .get(getProducts)
   .post(protect, createProduct);
 
+router.post('/bulk-delete', protect, bulkDeleteProducts);
 router.get('/export/excel', exportProductsExcel);
 router.get('/import/template', downloadImportTemplate);
+router.get('/import/sample', downloadSampleProducts);
 router.post('/import/excel', protect, upload.single('file'), bulkImportProducts);
 
 router.route('/:id')

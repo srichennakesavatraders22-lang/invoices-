@@ -108,30 +108,79 @@ export const CreateEditInvoice = () => {
   const [paymentMethod, setPaymentMethod] = useState('');
   const [paymentBreakdown, setPaymentBreakdown] = useState([]);
   const [showMixedPayment, setShowMixedPayment] = useState(false);
-  const [discountPercent, setDiscountPercent] = useState(0);
+  const [discountType, setDiscountType] = useState('percentage'); // 'percentage' | 'flat'
+  const [discountValue, setDiscountValue] = useState(0);
   const [dueDate, setDueDate] = useState('');
   const [transportMode, setTransportMode] = useState('');
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [lrNumber, setLrNumber] = useState('');
 
-  // Dynamic Line Items
+  // Dynamic Line Items with Carton / Box / Piece support
   const [items, setItems] = useState([
     {
       productId: '',
       productName: '',
+      packType: '',
+      category: '',
+      sellUnit: 'Box',
       qty: 10,
-      mrp: 0,
-      unit: 'Boxes',
-      cgstPercent: 2.5,
-      sgstPercent: 0,
-      igstPercent: 5.0,
-      taxableAmount: 0,
-      cgstAmount: 0,
-      sgstAmount: 0,
-      igstAmount: 0,
-      lineAmount: 0,
+      piecePrice: 4,
+      piecesPerBox: 24,
+      boxesPerCarton: 12,
+      boxesPerCotton: 12,
+      unitPrice: 96,
+      totalPiecesSold: 240,
+      stockPieces: 0,
+      gstPercent: 5,
+      taxableAmount: 960,
+      gstAmount: 48,
+      cgstAmount: 24,
+      sgstAmount: 24,
+      igstAmount: 48,
+      lineAmount: 1008,
     },
   ]);
+
+  // Helper: calculate line totals for Carton / Box / Piece
+  const calculateLineAmounts = (row) => {
+    const qty = Number(row.qty || 0);
+    const piecePrice = Number(row.piecePrice ?? 4);
+    const piecesPerBox = Number(row.piecesPerBox || 1);
+    const boxesPerCarton = Number(row.boxesPerCarton || row.boxesPerCotton || 1);
+    const sellUnit = row.sellUnit || 'Box';
+
+    let unitPrice = piecePrice;
+    let totalPiecesSold = qty;
+
+    if (sellUnit === 'Box') {
+      unitPrice = Number((piecePrice * piecesPerBox).toFixed(2));
+      totalPiecesSold = qty * piecesPerBox;
+    } else if (sellUnit === 'Carton' || sellUnit === 'Cotton') {
+      unitPrice = Number((piecePrice * piecesPerBox * boxesPerCarton).toFixed(2));
+      totalPiecesSold = qty * piecesPerBox * boxesPerCarton;
+    }
+    // sellUnit === 'Piece' -> unitPrice = piecePrice, totalPiecesSold = qty
+
+    const gross = Number((qty * unitPrice).toFixed(2));
+    const discountPercent = Number(row.discountPercent || 0);
+    const discountAmount = Number(((gross * discountPercent) / 100).toFixed(2));
+    const taxableAmount = Number((gross - discountAmount).toFixed(2));
+    const gstPercent = Number(row.gstPercent !== undefined ? row.gstPercent : 5);
+    const gstAmount = Number(((taxableAmount * gstPercent) / 100).toFixed(2));
+    const lineAmount = Number((taxableAmount + gstAmount).toFixed(2));
+
+    return {
+      unitPrice,
+      totalPiecesSold,
+      taxableAmount,
+      gstPercent,
+      gstAmount,
+      cgstAmount: Number((gstAmount / 2).toFixed(2)),
+      sgstAmount: Number((gstAmount / 2).toFixed(2)),
+      igstAmount: gstAmount,
+      lineAmount,
+    };
+  };
 
   useEffect(() => {
     loadInitialData();
@@ -160,7 +209,12 @@ export const CreateEditInvoice = () => {
           setNotes(inv.notes || '');
           setShippingAddress(inv.customerSnapshot?.shippingAddress || '');
           setPaymentMethod(inv.paymentMethod || '');
-          setDiscountPercent(inv.discountPercent || 0);
+          setDiscountType(inv.discountType || 'percentage');
+          if (inv.discountType === 'flat') {
+            setDiscountValue(inv.discountAmount !== undefined ? inv.discountAmount : 0);
+          } else {
+            setDiscountValue(inv.discountPercent !== undefined ? inv.discountPercent : 0);
+          }
           setDueDate(inv.dueDate ? new Date(inv.dueDate).toISOString().split('T')[0] : '');
           setTransportMode(inv.transportMode || '');
           setVehicleNumber(inv.vehicleNumber || '');
@@ -170,21 +224,25 @@ export const CreateEditInvoice = () => {
             setShowMixedPayment(inv.paymentMethod === 'Mixed');
           }
 
-          const mappedItems = inv.items.map((it) => ({
-            productId: it.product,
-            productName: it.itemName,
-            qty: it.qty,
-            mrp: it.mrp,
-            unit: it.unit || 'Boxes',
-            cgstPercent: it.cgstPercent,
-            sgstPercent: it.sgstPercent,
-            igstPercent: it.igstPercent,
-            taxableAmount: it.taxableAmount,
-            cgstAmount: it.cgstAmount,
-            sgstAmount: it.sgstAmount,
-            igstAmount: it.igstAmount,
-            lineAmount: it.amount,
-          }));
+          const mappedItems = inv.items.map((it) => {
+            const prod = (prodRes.data || []).find((p) => String(p._id) === String(it.product)) || {};
+            const row = {
+              productId: it.product,
+              productName: it.itemName,
+              packType: it.packType || prod.packType || '',
+              category: prod.category || '',
+              sellUnit: it.sellUnit || 'Box',
+              qty: it.qty,
+              piecePrice: it.piecePrice ?? prod.piecePrice ?? 4,
+              piecesPerBox: it.piecesPerBox ?? prod.piecesPerBox ?? 24,
+              boxesPerCarton: it.boxesPerCarton ?? it.boxesPerCotton ?? prod.boxesPerCarton ?? prod.boxesPerCotton ?? 12,
+              boxesPerCotton: it.boxesPerCarton ?? it.boxesPerCotton ?? prod.boxesPerCarton ?? prod.boxesPerCotton ?? 12,
+              stockPieces: prod.stockPieces ?? 0,
+              gstPercent: it.gstPercent ?? prod.gstPercent ?? 5,
+              discountPercent: it.discountPercent ?? 0,
+            };
+            return { ...row, ...calculateLineAmounts(row) };
+          });
           setItems(mappedItems);
         }
       } else {
@@ -193,49 +251,22 @@ export const CreateEditInvoice = () => {
         }
         if (prodRes.data && prodRes.data.length > 0) {
           const p = prodRes.data[0];
-          const isInterState = custRes.data && custRes.data.length > 0 ? custRes.data[0].isInterState : false;
-          
-          let cp = parseFloat(p.cgstPercent) || 0;
-          let sp = parseFloat(p.sgstPercent) || 0;
-          let ip = parseFloat(p.igstPercent) || 0;
-
-          if (cp === 0 && sp === 0 && ip === 0) {
-            cp = 2.5; sp = 2.5; ip = 5.0;
-          }
-
-          let useIgst = isInterState;
-          if (ip === 0 && (cp > 0 || sp > 0)) useIgst = false;
-          else if (cp === 0 && sp === 0 && ip > 0) useIgst = true;
-
-          const taxable = 10 * p.mrp;
-          let cgstAmt = 0, sgstAmt = 0, igstAmt = 0;
-
-          if (useIgst) {
-            igstAmt = (taxable * ip) / 100;
-            cp = 0; sp = 0;
-          } else {
-            cgstAmt = (taxable * cp) / 100;
-            sgstAmt = (taxable * sp) / 100;
-            ip = 0;
-          }
-
-          setItems([
-            {
-              productId: p._id,
-              productName: p.name,
-              qty: 10,
-              mrp: p.mrp,
-              unit: p.unit || 'Boxes',
-              cgstPercent: cp,
-              sgstPercent: sp,
-              igstPercent: ip,
-              taxableAmount: taxable,
-              cgstAmount: Number(cgstAmt.toFixed(2)),
-              sgstAmount: Number(sgstAmt.toFixed(2)),
-              igstAmount: Number(igstAmt.toFixed(2)),
-              lineAmount: Number((taxable + cgstAmt + sgstAmt + igstAmt).toFixed(2)),
-            },
-          ]);
+          const row = {
+            productId: p._id,
+            productName: p.name,
+            packType: p.packType || '',
+            category: p.category || '',
+            sellUnit: 'Box',
+            qty: 10,
+            piecePrice: p.piecePrice ?? 4,
+            piecesPerBox: p.piecesPerBox ?? 24,
+            boxesPerCarton: p.boxesPerCarton ?? p.boxesPerCotton ?? 12,
+            boxesPerCotton: p.boxesPerCarton ?? p.boxesPerCotton ?? 12,
+            stockPieces: p.stockPieces ?? 0,
+            gstPercent: p.gstPercent ?? 5,
+            discountPercent: 0,
+          };
+          setItems([{ ...row, ...calculateLineAmounts(row) }]);
         }
       }
     } catch (err) {
@@ -260,66 +291,38 @@ export const CreateEditInvoice = () => {
     }
   };
 
-  // Line Item Calculations
-  const calculateLineTaxes = (itemConfig, qty, isInterState) => {
-    const mrp = itemConfig.mrp || 0;
-    const taxable = qty * mrp;
-
-    let cp = parseFloat(itemConfig.cgstPercent) || 0;
-    let sp = parseFloat(itemConfig.sgstPercent) || 0;
-    let ip = parseFloat(itemConfig.igstPercent) || 0;
-
-    if (cp === 0 && sp === 0 && ip === 0) {
-      cp = 2.5; sp = 2.5; ip = 5.0;
-    }
-
-    let useIgst = isInterState;
-    // Override interstate logic if product explicitly only supports one type
-    if (ip === 0 && (cp > 0 || sp > 0)) useIgst = false;
-    else if (cp === 0 && sp === 0 && ip > 0) useIgst = true;
-
-    let cgstAmt = 0, sgstAmt = 0, igstAmt = 0;
-
-    if (useIgst) {
-      igstAmt = (taxable * ip) / 100;
-      cp = 0; sp = 0;
-    } else {
-      cgstAmt = (taxable * cp) / 100;
-      sgstAmt = (taxable * sp) / 100;
-      ip = 0;
-    }
-
-    return {
-      taxableAmount: taxable,
-      cgstPercent: cp,
-      sgstPercent: sp,
-      igstPercent: ip,
-      cgstAmount: Number(cgstAmt.toFixed(2)),
-      sgstAmount: Number(sgstAmt.toFixed(2)),
-      igstAmount: Number(igstAmt.toFixed(2)),
-      lineAmount: Number((taxable + cgstAmt + sgstAmt + igstAmt).toFixed(2)),
-    };
-  };
-
+  // Row update handlers
   const updateRowProduct = (index, productId) => {
     const prod = products.find((p) => p._id === productId);
     if (!prod) return;
 
     const newItems = [...items];
-    const qty = newItems[index].qty || 1;
-    const isInterState = selectedCustomer?.isInterState || false;
-    
-    const taxData = calculateLineTaxes(prod, qty, isInterState);
+    const currentRow = newItems[index] || {};
+    const qty = currentRow.qty || 1;
+    const sellUnit = currentRow.sellUnit || 'Box';
 
-    newItems[index] = {
+    const row = {
       productId: prod._id,
       productName: prod.name,
+      packType: prod.packType || '',
+      category: prod.category || '',
+      sellUnit,
       qty,
-      mrp: prod.mrp,
-      unit: prod.unit || 'Boxes',
-      ...taxData
+      piecePrice: prod.piecePrice ?? 4,
+      piecesPerBox: prod.piecesPerBox ?? 24,
+      boxesPerCarton: prod.boxesPerCarton ?? prod.boxesPerCotton ?? 12,
+      stockPieces: prod.stockPieces ?? 0,
+      gstPercent: prod.gstPercent ?? 5,
+      discountPercent: 0,
     };
+    newItems[index] = { ...row, ...calculateLineAmounts(row) };
+    setItems(newItems);
+  };
 
+  const updateRowUnit = (index, newUnit) => {
+    const newItems = [...items];
+    const row = { ...newItems[index], sellUnit: newUnit };
+    newItems[index] = { ...row, ...calculateLineAmounts(row) };
     setItems(newItems);
   };
 
@@ -327,28 +330,26 @@ export const CreateEditInvoice = () => {
     let qty = qtyVal === '' ? '' : parseInt(qtyVal, 10);
     if (qty !== '' && (isNaN(qty) || qty < 0)) qty = 0;
 
-    const numericQty = qty === '' ? 0 : qty;
     const newItems = [...items];
-    const row = newItems[index];
-    const isInterState = selectedCustomer?.isInterState || false;
-    const taxData = calculateLineTaxes(row, numericQty, isInterState);
+    const row = { ...newItems[index], qty };
+    newItems[index] = { ...row, ...calculateLineAmounts(row) };
+    setItems(newItems);
+  };
 
-    newItems[index] = {
-      ...row,
-      qty,
-      ...taxData
-    };
-
+  const updateRowPiecePrice = (index, piecePriceVal) => {
+    const newItems = [...items];
+    const row = { ...newItems[index], piecePrice: piecePriceVal };
+    newItems[index] = { ...row, ...calculateLineAmounts(row) };
     setItems(newItems);
   };
 
   const incrementQty = (index) => {
-    const current = items[index]?.qty || 1;
+    const current = Number(items[index]?.qty || 1);
     updateRowQty(index, current + 1);
   };
 
   const decrementQty = (index) => {
-    const current = items[index]?.qty || 1;
+    const current = Number(items[index]?.qty || 1);
     if (current > 1) {
       updateRowQty(index, current - 1);
     }
@@ -361,21 +362,22 @@ export const CreateEditInvoice = () => {
       return;
     }
 
-    const qty = 5;
-    const isInterState = selectedCustomer?.isInterState || false;
-    const taxData = calculateLineTaxes(defaultProduct, qty, isInterState);
-
-    setItems([
-      ...items,
-      {
-        productId: defaultProduct._id,
-        productName: defaultProduct.name,
-        qty,
-        mrp: defaultProduct.mrp,
-        unit: defaultProduct.unit || 'Boxes',
-        ...taxData
-      },
-    ]);
+    const row = {
+      productId: defaultProduct._id,
+      productName: defaultProduct.name,
+      packType: defaultProduct.packType || '',
+      category: defaultProduct.category || '',
+      sellUnit: 'Box',
+      qty: 5,
+      piecePrice: defaultProduct.piecePrice ?? 4,
+      piecesPerBox: defaultProduct.piecesPerBox ?? 24,
+      boxesPerCarton: defaultProduct.boxesPerCarton ?? defaultProduct.boxesPerCotton ?? 12,
+      boxesPerCotton: defaultProduct.boxesPerCarton ?? defaultProduct.boxesPerCotton ?? 12,
+      stockPieces: defaultProduct.stockPieces ?? 0,
+      gstPercent: defaultProduct.gstPercent ?? 5,
+      discountPercent: 0,
+    };
+    setItems([...items, { ...row, ...calculateLineAmounts(row) }]);
   };
 
   const removeRow = (index) => {
@@ -389,37 +391,59 @@ export const CreateEditInvoice = () => {
   const loadReferenceInvoiceSKUs = () => {
     if (!products || products.length === 0) return;
     const quantities = [10, 8, 6, 6, 5, 4, 3, 3, 4, 3, 2, 2, 6, 5, 4, 4];
-    const isInterState = selectedCustomer?.isInterState || false;
-
     const populated = products.map((p, idx) => {
       const qty = quantities[idx % quantities.length] || 5;
-      const taxData = calculateLineTaxes(p, qty, isInterState);
-
-      return {
+      const row = {
         productId: p._id,
         productName: p.name,
+        packType: p.packType || '',
+        category: p.category || '',
+        sellUnit: 'Box',
         qty,
-        mrp: p.mrp,
-        unit: p.unit || 'Boxes',
-        ...taxData
+        piecePrice: p.piecePrice ?? 4,
+        piecesPerBox: p.piecesPerBox ?? 24,
+        boxesPerCarton: p.boxesPerCarton ?? p.boxesPerCotton ?? 12,
+        boxesPerCotton: p.boxesPerCarton ?? p.boxesPerCotton ?? 12,
+        stockPieces: p.stockPieces ?? 0,
+        gstPercent: p.gstPercent ?? 5,
+        discountPercent: 0,
       };
+      return { ...row, ...calculateLineAmounts(row) };
     });
 
     setItems(populated);
-    toast.success('Loaded full 16-SKU wholesale order!');
+    toast.success('Loaded reference wholesale orders!');
   };
 
   // Computations
   const subTotal = items.reduce((acc, row) => acc + (row.taxableAmount || 0), 0);
+  const totalGst = items.reduce((acc, row) => acc + (row.gstAmount || 0), 0);
   const totalCgst = items.reduce((acc, row) => acc + (row.cgstAmount || 0), 0);
   const totalSgst = items.reduce((acc, row) => acc + (row.sgstAmount || 0), 0);
   const totalIgst = items.reduce((acc, row) => acc + (row.igstAmount || 0), 0);
-  const totalTax = totalCgst + totalSgst + totalIgst;
-  const isIgstInvoice = totalIgst > 0 || (totalCgst === 0 && totalSgst === 0 && selectedCustomer?.isInterState);
-  
-  const discountAmt = Number(((subTotal + totalTax) * (discountPercent || 0) / 100).toFixed(2));
-  const grandTotal = Math.max(0, subTotal + totalTax - discountAmt);
-  const totalBoxes = items.reduce((acc, row) => acc + (row.qty || 0), 0);
+  const totalTax = totalGst;
+  const isIgstInvoice = selectedCustomer?.isInterState || false;
+
+  const numDiscountVal = Number(discountValue || 0);
+  const totalBeforeDiscount = Number((subTotal + totalTax).toFixed(2));
+  let discountAmt = 0;
+  let effectiveDiscountPercent = 0;
+
+  if (discountType === 'flat') {
+    discountAmt = Math.min(totalBeforeDiscount, Math.max(0, numDiscountVal));
+    discountAmt = Number(discountAmt.toFixed(2));
+    effectiveDiscountPercent = totalBeforeDiscount > 0
+      ? Number(((discountAmt / totalBeforeDiscount) * 100).toFixed(2))
+      : 0;
+  } else {
+    effectiveDiscountPercent = Math.min(100, Math.max(0, numDiscountVal));
+    discountAmt = Number(((totalBeforeDiscount * effectiveDiscountPercent) / 100).toFixed(2));
+  }
+  const grandTotal = Math.max(0, Number((totalBeforeDiscount - discountAmt).toFixed(2)));
+  const totalPieces = items.reduce((acc, row) => acc + (row.totalPiecesSold || 0), 0);
+  const totalCartons = items.filter(r => r.sellUnit === 'Carton' || r.sellUnit === 'Cotton').reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
+  const totalBoxes = items.filter(r => r.sellUnit === 'Box').reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
+  const totalDirectPieces = items.filter(r => r.sellUnit === 'Piece').reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
   const liveAmountInWords = numberToWordsIndian(grandTotal);
 
   // Date format validator: DD-MM-YYYY
@@ -458,6 +482,24 @@ export const CreateEditInvoice = () => {
     });
   };
 
+  const getAvailableStockText = (prod, unit) => {
+    if (!prod) return '0 pcs';
+    const pieces = Number(prod.stockPieces ?? 0);
+    const ppb = Number(prod.piecesPerBox || 1);
+    const bpc = Number(prod.boxesPerCarton || prod.boxesPerCotton || 1);
+    const ppc = ppb * bpc;
+
+    if (unit === 'Carton' || unit === 'Cotton') {
+      const cartons = Math.floor(pieces / ppc);
+      return `${cartons} cartons`;
+    }
+    if (unit === 'Box') {
+      const boxes = Math.floor(pieces / ppb);
+      return `${boxes} boxes`;
+    }
+    return `${pieces} pcs`;
+  };
+
   // Build live invoice snapshot object for the side preview
   const livePreviewInvoice = {
     invoiceNumber: company?.invoicePrefix ? `${company.invoicePrefix}PREVIEW` : 'SCKT/2026-27/0002',
@@ -492,18 +534,33 @@ export const CreateEditInvoice = () => {
     items: items.map((it) => ({
       _id: it.productId,
       itemName: it.productName || 'Selected Item',
+      packType: it.packType || '',
+      sellUnit: it.sellUnit || 'Box',
       qty: it.qty,
-      mrp: it.mrp,
+      piecePrice: it.piecePrice,
+      unitPrice: it.unitPrice,
+      mrp: it.unitPrice,
+      piecesPerBox: it.piecesPerBox,
+      boxesPerCarton: it.boxesPerCarton || it.boxesPerCotton,
+      boxesPerCotton: it.boxesPerCarton || it.boxesPerCotton,
+      totalPiecesSold: it.totalPiecesSold,
+      taxableAmount: it.taxableAmount,
+      gstPercent: it.gstPercent,
+      gstAmount: it.gstAmount,
       cgstAmount: it.cgstAmount,
       sgstAmount: it.sgstAmount,
       igstAmount: it.igstAmount,
       amount: it.lineAmount,
     })),
     subTotal,
+    totalGst,
     totalCgst,
     totalSgst,
     totalIgst,
     totalTax,
+    discountType,
+    discountPercent: effectiveDiscountPercent,
+    discountAmount: discountAmt,
     grandTotal,
     amountInWords: liveAmountInWords,
     status: 'Draft',
@@ -524,6 +581,9 @@ export const CreateEditInvoice = () => {
     const payloadItems = items.map((it) => ({
       product: it.productId,
       qty: it.qty,
+      sellUnit: it.sellUnit || 'Box',
+      piecePrice: it.piecePrice,
+      discountPercent: it.discountPercent || 0,
     }));
 
     if (payloadItems.some((it) => !it.product)) {
@@ -560,7 +620,9 @@ export const CreateEditInvoice = () => {
         invoiceTime,
         paymentMethod: showMixedPayment && paymentBreakdown.length > 1 ? 'Mixed' : paymentMethod,
         paymentBreakdown: showMixedPayment && paymentBreakdown.length > 0 ? paymentBreakdown : [],
-        discountPercent: Number(discountPercent || 0),
+        discountType,
+        discountPercent: effectiveDiscountPercent,
+        discountAmount: discountAmt,
         dueDate: dueDate || null,
         transportMode: transportMode || '',
         vehicleNumber: vehicleNumber || '',
@@ -746,14 +808,8 @@ export const CreateEditInvoice = () => {
                   Customer Information
                 </h2>
                 {selectedCustomer && (
-                  <span
-                    className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
-                      selectedCustomer.isInterState
-                        ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                        : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                    }`}
-                  >
-                    {isIgstInvoice ? 'Interstate (IGST 5%)' : 'Intrastate (CGST/SGST)'}
+                  <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                    Live GST (5%)
                   </span>
                 )}
               </div>
@@ -890,7 +946,7 @@ export const CreateEditInvoice = () => {
                     Line Items & Wholesale SKUs
                   </h2>
                   <p className="text-xs text-slate-500">
-                    Select chocolate/confectionery SKU and box quantity. Rates update instantly.
+                    Select chocolate/confectionery SKU and toggle sell unit (Carton, Box, or Piece).
                   </p>
                 </div>
 
@@ -906,114 +962,162 @@ export const CreateEditInvoice = () => {
 
               {/* MOBILE VIEW: Touch-first Item Cards (PhonePe / Google Pay Style) */}
               <div className="block md:hidden p-3 space-y-3 max-h-[500px] overflow-y-auto">
-                {items.map((row, index) => (
-                  <div
-                    key={index}
-                    className="rounded-2xl border border-sky-100 bg-white/90 p-3.5 shadow-xs space-y-3"
-                  >
-                    <div className="flex items-center justify-between border-b border-sky-50 pb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-sky-100 font-mono text-xs font-black text-sky-700">
-                          #{index + 1}
-                        </span>
-                        <span className="text-xs font-bold text-slate-700">
-                          Product Line Item
-                        </span>
+                {items.map((row, index) => {
+                  const selProd = products.find(p => p._id === row.productId);
+                  return (
+                    <div
+                      key={index}
+                      className="rounded-2xl border border-sky-100 bg-white/90 p-3.5 shadow-xs space-y-3"
+                    >
+                      <div className="flex items-center justify-between border-b border-sky-50 pb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-sky-100 font-mono text-xs font-black text-sky-700">
+                            #{index + 1}
+                          </span>
+                          <span className="text-xs font-bold text-slate-700">
+                            {row.productName || 'Line Item'}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeRow(index)}
+                          className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-colors"
+                          title="Remove item"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => removeRow(index)}
-                        className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-colors"
-                        title="Remove item"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
 
-                    {/* SKU Selection */}
-                    <div>
-                      <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                        Select SKU
-                      </label>
-                      <select
-                        value={row.productId}
-                        onChange={(e) => updateRowProduct(index, e.target.value)}
-                        className="w-full rounded-xl border border-sky-200/90 bg-white px-3 py-2 text-xs font-bold text-slate-800 shadow-xs focus:border-sky-500 focus:outline-none"
-                      >
-                        <option value="">-- Choose SKU --</option>
-                        {products.map((p) => (
-                          <option key={p._id} value={p._id}>
-                            {p.name} ({p.packType}) - Rs. {Number(p.mrp).toFixed(2)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Box Quantity Stepper + MRP */}
-                    <div className="flex items-center justify-between bg-sky-50/50 rounded-xl p-2.5 border border-sky-100">
+                      {/* SKU Selection */}
                       <div>
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                          Quantity (Boxes)
-                        </span>
-                        <div className="flex items-center gap-2 mt-1">
-                          <button
-                            type="button"
-                            onClick={() => decrementQty(index)}
-                            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white border border-sky-200 text-slate-700 font-black text-sm active:scale-90 shadow-2xs hover:bg-sky-50"
-                          >
-                            -
-                          </button>
-                          <input
-                            type="number"
-                            onWheel={(e) => e.target.blur()}
-                            onKeyDown={(e) => ['-', '+', 'e', 'E'].includes(e.key) && e.preventDefault()}
-                            min="0"
-                            value={row.qty}
-                            onChange={(e) => updateRowQty(index, e.target.value)}
-                            className="w-14 text-center rounded-lg border border-sky-200 bg-white py-1 text-xs font-mono font-bold text-slate-900 shadow-xs focus:border-sky-500 focus:outline-none"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => incrementQty(index)}
-                            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white border border-sky-200 text-slate-700 font-black text-sm active:scale-90 shadow-2xs hover:bg-sky-50"
-                          >
-                            +
-                          </button>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          Select SKU
+                        </label>
+                        <select
+                          value={row.productId}
+                          onChange={(e) => updateRowProduct(index, e.target.value)}
+                          className="w-full rounded-xl border border-sky-200/90 bg-white px-3 py-2 text-xs font-bold text-slate-800 shadow-xs focus:border-sky-500 focus:outline-none"
+                        >
+                          <option value="">-- Choose SKU --</option>
+                          {products.map((p) => (
+                            <option key={p._id} value={p._id}>
+                              {p.name} ({p.packType}) - Rs. {Number(p.piecePrice ?? 4).toFixed(2)}/pc
+                            </option>
+                          ))}
+                        </select>
+                        {selProd && (
+                          <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
+                            <span>Avail Stock: <b className="text-sky-700 font-bold">{getAvailableStockText(selProd, row.sellUnit)}</b> (Total: {selProd.stockPieces ?? 0} pcs)</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Sell Unit: 3 Toggle Buttons (Cotton / Box / Piece) */}
+                      <div>
+                        <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                          Selling Unit
+                        </label>
+                        <div className="grid grid-cols-3 gap-1.5 bg-slate-100 p-1 rounded-xl">
+                          {['Carton', 'Box', 'Piece'].map((u) => {
+                            const isSelected = row.sellUnit === u;
+                            return (
+                              <button
+                                key={u}
+                                type="button"
+                                onClick={() => updateRowUnit(index, u)}
+                                className={`py-1.5 text-xs font-bold rounded-lg transition-all text-center ${
+                                  isSelected
+                                    ? u === 'Carton' || u === 'Cotton'
+                                      ? 'bg-purple-600 text-white shadow-sm'
+                                      : u === 'Box'
+                                      ? 'bg-sky-600 text-white shadow-sm'
+                                      : 'bg-teal-600 text-white shadow-sm'
+                                    : 'text-slate-600 hover:text-slate-900'
+                                }`}
+                              >
+                                {u}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="mt-1 text-[10.5px] font-bold text-slate-500 text-right">
+                          {(row.sellUnit === 'Carton' || row.sellUnit === 'Cotton') && `(= ${row.qty * (row.boxesPerCarton || row.boxesPerCotton || 1)} Boxes / ${row.totalPiecesSold} Pcs)`}
+                          {row.sellUnit === 'Box' && `(= ${row.totalPiecesSold} Pcs)`}
+                          {row.sellUnit === 'Piece' && `(= ${row.qty} Pcs)`}
                         </div>
                       </div>
 
-                      <div className="text-right">
-                        <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                          MRP / Rate
-                        </span>
-                        <p className="font-mono text-xs font-bold text-slate-800 mt-1">
-                          Rs. {formatINR(row.mrp)}
-                        </p>
-                      </div>
-                    </div>
+                      {/* Quantity Stepper + Rates */}
+                      <div className="grid grid-cols-2 gap-2 bg-sky-50/50 rounded-xl p-2.5 border border-sky-100">
+                        <div>
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                            Qty ({row.sellUnit})
+                          </span>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => decrementQty(index)}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white border border-sky-200 text-slate-700 font-black text-sm active:scale-90 shadow-2xs hover:bg-sky-50"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              onWheel={(e) => e.target.blur()}
+                              onKeyDown={(e) => ['-', '+', 'e', 'E'].includes(e.key) && e.preventDefault()}
+                              min="0"
+                              value={row.qty}
+                              onChange={(e) => updateRowQty(index, e.target.value)}
+                              className="w-14 text-center rounded-lg border border-sky-200 bg-white py-1 text-xs font-mono font-bold text-slate-900 shadow-xs focus:border-sky-500 focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => incrementQty(index)}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white border border-sky-200 text-slate-700 font-black text-sm active:scale-90 shadow-2xs hover:bg-sky-50"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
 
-                    {/* Tax & Line Amount breakdown */}
-                    <div className="flex items-center justify-between text-xs pt-1 border-t border-sky-50">
-                      <div className="text-slate-500 text-[10.5px]">
-                        Tax ({isIgstInvoice ? 'IGST' : 'CGST/SGST'}):{' '}
-                        <span className="font-mono font-bold text-slate-700">
-                          Rs.{' '}
-                          {isIgstInvoice
-                            ? formatINR(row.igstAmount)
-                            : formatINR((row.cgstAmount || 0) + (row.sgstAmount || 0))}
-                        </span>
+                        <div>
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                            Piece Price (Rs.)
+                          </span>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={row.piecePrice}
+                            onChange={(e) => updateRowPiecePrice(index, e.target.value)}
+                            className="mt-1 w-full text-right rounded-lg border border-sky-200 bg-white px-2 py-1 text-xs font-mono font-bold text-slate-900 shadow-xs focus:border-sky-500 focus:outline-none"
+                          />
+                          <p className="text-[10px] font-bold text-teal-600 mt-0.5 text-right">
+                            {row.sellUnit} Rate: Rs. {formatINR(row.unitPrice)}
+                          </p>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
-                          Row Total
-                        </span>
-                        <span className="font-mono text-sm font-black text-sky-700">
-                          Rs. {formatINR(row.lineAmount)}
-                        </span>
+
+                      {/* Tax & Line Amount breakdown */}
+                      <div className="flex items-center justify-between text-xs pt-1 border-t border-sky-50">
+                        <div className="text-slate-500 text-[10.5px]">
+                          GST ({row.gstPercent}%):{' '}
+                          <span className="font-mono font-bold text-slate-700">
+                            Rs. {formatINR(row.gstAmount)}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                            Row Total
+                          </span>
+                          <span className="font-mono text-sm font-black text-sky-700">
+                            Rs. {formatINR(row.lineAmount)}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
 
                 <button
                   type="button"
@@ -1025,97 +1129,177 @@ export const CreateEditInvoice = () => {
                 </button>
               </div>
 
-              {/* DESKTOP VIEW: Full Data Table */}
-              <div className="hidden md:block overflow-x-auto max-h-[460px] overflow-y-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="sticky top-0 z-10">
-                    <tr className="border-b border-sky-100 bg-sky-50/90 backdrop-blur-md text-[10.5px] font-bold uppercase tracking-wider text-slate-600">
-                      <th className="py-2.5 pl-3 w-10 text-center">#</th>
-                      <th className="py-2.5 min-w-[200px]">Item SKU Name</th>
-                      <th className="py-2.5 w-24 text-center">Qty (Boxes)</th>
-                      <th className="py-2.5 w-24 text-right">MRP (Rs.)</th>
-                      <th className="py-2.5 w-24 text-right">Taxable</th>
-                      {!isIgstInvoice && (
-                        <>
-                          <th className="py-2.5 w-20 text-right">CGST</th>
-                          <th className="py-2.5 w-20 text-right">SGST</th>
-                        </>
-                      )}
-                      {isIgstInvoice && (
-                        <th className="py-2.5 w-24 text-right">IGST</th>
-                      )}
-                      <th className="py-2.5 w-28 text-right">Amount (Rs.)</th>
-                      <th className="py-2.5 pr-3 w-10 text-center"></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-sky-100/70">
-                    {items.map((row, index) => (
-                      <tr key={index} className="hover:bg-sky-50/30 transition-colors">
-                        <td className="py-2 pl-3 text-center font-mono text-xs font-bold text-slate-400">
-                          {index + 1}
-                        </td>
-                        <td className="py-2">
+              {/* DESKTOP VIEW: Clean 2-Row Line Item Cards with Equal Alignment */}
+              <div className="hidden md:block space-y-3 max-h-[520px] overflow-y-auto p-1">
+                {items.map((row, index) => {
+                  const selProd = products.find((p) => p._id === row.productId);
+                  return (
+                    <div
+                      key={index}
+                      className="rounded-2xl border border-sky-150 bg-gradient-to-r from-sky-50/40 via-white to-white p-3.5 shadow-2xs hover:border-sky-300 transition-all space-y-2.5"
+                    >
+                      {/* ROW 1: S.No, SKU Selector, Sell Unit Toggle Buttons, and Trash Button */}
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-sky-100 font-mono text-xs font-black text-sky-700 shrink-0">
+                          #{index + 1}
+                        </span>
+
+                        {/* SKU Selector (flex-1) */}
+                        <div className="flex-1 min-w-[220px]">
                           <select
                             value={row.productId}
                             onChange={(e) => updateRowProduct(index, e.target.value)}
-                            className="w-full rounded-lg border border-sky-200/90 bg-white/90 px-2.5 py-1.5 text-xs font-bold text-slate-800 shadow-xs focus:border-sky-500 focus:outline-none"
+                            className="w-full rounded-xl border border-sky-200/90 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 shadow-2xs focus:border-sky-500 focus:outline-none"
                           >
-                            <option value="">-- Choose SKU --</option>
+                            <option value="">-- Choose Wholesale SKU --</option>
                             {products.map((p) => (
                               <option key={p._id} value={p._id}>
-                                {p.name} ({p.packType}) - Rs. {Number(p.mrp).toFixed(2)}
+                                {p.name} ({p.packType}) - Rs. {Number(p.piecePrice ?? 4).toFixed(2)}/pc
                               </option>
                             ))}
                           </select>
-                        </td>
-                        <td className="py-2 text-center">
+                        </div>
+
+                        {/* Sell Unit: Carton / Box / Piece Toggle */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
+                            Unit:
+                          </span>
+                          <div className="inline-flex rounded-xl bg-slate-100 p-0.5 border border-slate-200">
+                            {['Carton', 'Box', 'Piece'].map((u) => {
+                              const isSelected = row.sellUnit === u;
+                              return (
+                                <button
+                                  key={u}
+                                  type="button"
+                                  onClick={() => updateRowUnit(index, u)}
+                                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
+                                    isSelected
+                                      ? u === 'Carton' || u === 'Cotton'
+                                        ? 'bg-purple-600 text-white shadow-xs'
+                                        : u === 'Box'
+                                        ? 'bg-sky-600 text-white shadow-xs'
+                                        : 'bg-teal-600 text-white shadow-xs'
+                                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                                  }`}
+                                >
+                                  {u}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Stock & Breakdown info badge */}
+                        {selProd && (
+                          <div className="hidden lg:flex items-center text-[10px] text-slate-500 bg-sky-50 px-2.5 py-1 rounded-lg border border-sky-100 whitespace-nowrap shrink-0">
+                            Avail:&nbsp;<b className="text-sky-700 font-bold">{getAvailableStockText(selProd, row.sellUnit)}</b>
+                          </div>
+                        )}
+
+                        {/* Remove Row Button */}
+                        <button
+                          type="button"
+                          onClick={() => removeRow(index)}
+                          className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-colors shrink-0"
+                          title="Remove SKU"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+
+                      {/* ROW 2: Equally Arranged Numerical Fields (Qty, Piece Price, Unit Rate, Taxable, GST %, Amount) */}
+                      <div className="grid grid-cols-6 gap-2.5 bg-slate-50/80 rounded-xl p-2.5 border border-sky-100/80 items-center">
+                        {/* 1. Qty Stepper */}
+                        <div>
+                          <label className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">
+                            Qty ({row.sellUnit || 'Box'})
+                          </label>
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => decrementQty(index)}
+                              className="h-6 w-6 rounded bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs"
+                            >
+                              -
+                            </button>
+                            <input
+                              type="number"
+                              onWheel={(e) => e.target.blur()}
+                              onKeyDown={(e) => ['-', '+', 'e', 'E'].includes(e.key) && e.preventDefault()}
+                              min="0"
+                              value={row.qty}
+                              onChange={(e) => updateRowQty(index, e.target.value)}
+                              className="w-12 text-center rounded-lg border border-sky-200 bg-white py-0.5 text-xs font-mono font-bold text-slate-900 shadow-2xs focus:border-sky-500 focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => incrementQty(index)}
+                              className="h-6 w-6 rounded bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold text-xs"
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 2. Piece Price */}
+                        <div>
+                          <label className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">
+                            Piece (Rs.)
+                          </label>
                           <input
                             type="number"
-                            onWheel={(e) => e.target.blur()}
-                            onKeyDown={(e) => ['-', '+', 'e', 'E'].includes(e.key) && e.preventDefault()}
+                            step="0.01"
                             min="0"
-                            value={row.qty}
-                            onChange={(e) => updateRowQty(index, e.target.value)}
-                            className="w-16 text-center rounded-lg border border-sky-200 bg-white py-1 text-xs font-mono font-bold text-slate-900 shadow-xs focus:border-sky-500 focus:outline-none"
+                            value={row.piecePrice}
+                            onChange={(e) => updateRowPiecePrice(index, e.target.value)}
+                            className="w-full text-right rounded-lg border border-sky-200 bg-white px-2 py-0.5 text-xs font-mono font-bold text-slate-800 shadow-2xs focus:border-sky-500 focus:outline-none"
                           />
-                        </td>
-                        <td className="py-2 text-right font-mono text-xs font-semibold text-slate-600">
-                          {formatINR(row.mrp)}
-                        </td>
-                        <td className="py-2 text-right font-mono text-xs font-semibold text-slate-600">
-                          {formatINR(row.taxableAmount)}
-                        </td>
-                        {!isIgstInvoice && (
-                          <>
-                            <td className="py-2 text-right font-mono text-xs font-semibold text-slate-600">
-                              {formatINR(row.cgstAmount)}
-                            </td>
-                            <td className="py-2 text-right font-mono text-xs font-semibold text-slate-600">
-                              {formatINR(row.sgstAmount)}
-                            </td>
-                          </>
-                        )}
-                        {isIgstInvoice && (
-                          <td className="py-2 text-right font-mono text-xs font-semibold text-slate-600">
-                            {formatINR(row.igstAmount)}
-                          </td>
-                        )}
-                        <td className="py-2 text-right font-mono font-bold text-slate-900 text-xs">
-                          {formatINR(row.lineAmount)}
-                        </td>
-                        <td className="py-2 pr-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => removeRow(index)}
-                            className="rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-colors"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </div>
+
+                        {/* 3. Unit Rate */}
+                        <div className="text-right">
+                          <label className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">
+                            Rate / {row.sellUnit}
+                          </label>
+                          <span className="font-mono text-xs font-bold text-teal-700">
+                            Rs. {formatINR(row.unitPrice)}
+                          </span>
+                        </div>
+
+                        {/* 4. Taxable (Original Base Price) */}
+                        <div className="text-right">
+                          <label className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">
+                            Original Price
+                          </label>
+                          <span className="font-mono text-xs font-bold text-slate-700">
+                            Rs. {formatINR(row.taxableAmount)}
+                          </span>
+                        </div>
+
+                        {/* 5. GST Rate (%) */}
+                        <div className="text-right">
+                          <label className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">
+                            GST %
+                          </label>
+                          <span className="inline-block rounded-md bg-sky-100 px-2 py-0.5 text-xs font-mono font-bold text-sky-800">
+                            {row.gstPercent ?? 5}%
+                          </span>
+                        </div>
+
+                        {/* 6. Total Row Amount (Incl. GST) */}
+                        <div className="text-right">
+                          <label className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">
+                            Row Total
+                          </label>
+                          <span className="font-mono text-xs font-black text-sky-700">
+                            Rs. {formatINR(row.lineAmount)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Order Notes & Summary + Payment & Discount */}
@@ -1134,7 +1318,7 @@ export const CreateEditInvoice = () => {
                       className="w-full rounded-xl border border-sky-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-sky-500 focus:outline-none"
                     />
                     <p className="text-[11px] font-semibold text-slate-500 mt-1.5">
-                      Total Order: <span className="text-sky-600 font-extrabold">{totalBoxes} Boxes</span> across {items.length} SKUs.
+                      Total Order: <span className="text-sky-600 font-extrabold">{totalPieces} Pieces</span> ({totalCartons > 0 ? `${totalCartons} Cartons ` : ''}{totalBoxes > 0 ? `${totalBoxes} Boxes ` : ''}{totalDirectPieces > 0 ? `${totalDirectPieces} Pcs` : ''}) across {items.length} SKUs.
                     </p>
                   </div>
 
@@ -1145,22 +1329,16 @@ export const CreateEditInvoice = () => {
                       <span className="font-mono font-bold text-slate-800">Rs. {formatINR(subTotal)}</span>
                     </div>
                     <div className="flex justify-between text-xs font-medium text-slate-600">
-                      <span>{isIgstInvoice ? 'IGST:' : 'CGST:'}</span>
+                      <span>GST (5%):</span>
                       <span className="font-mono font-bold text-slate-800">
-                        Rs. {formatINR(isIgstInvoice ? totalIgst : totalCgst)}
+                        Rs. {formatINR(totalGst)}
                       </span>
                     </div>
-                    {!isIgstInvoice && (
-                      <div className="flex justify-between text-xs font-medium text-slate-600">
-                        <span>SGST:</span>
-                        <span className="font-mono font-bold text-slate-800">
-                          Rs. {formatINR(totalSgst)}
-                        </span>
-                      </div>
-                    )}
-                    {discountPercent > 0 && (
+                    {discountAmt > 0 && (
                       <div className="flex justify-between text-xs font-medium text-emerald-700">
-                        <span>Discount ({discountPercent}%):</span>
+                        <span>
+                          Discount {discountType === 'flat' ? '(Flat)' : `(${effectiveDiscountPercent}%)`}:
+                        </span>
                         <span className="font-mono font-bold">- Rs. {formatINR(discountAmt)}</span>
                       </div>
                     )}
@@ -1198,25 +1376,81 @@ export const CreateEditInvoice = () => {
                       </select>
                     </div>
 
-                    {/* Discount % */}
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-wider">Discount %</label>
-                      <input
-                        type="number"
-                        onWheel={(e) => e.target.blur()}
-                        onKeyDown={(e) => ['-', '+', 'e', 'E'].includes(e.key) && e.preventDefault()}
-                        min="0"
-                        max="100"
-                        step="0.5"
-                        value={discountPercent}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          if (val === '') setDiscountPercent('');
-                          else setDiscountPercent(Math.min(100, Math.max(0, Number(val))));
-                        }}
-                        className="w-full rounded-xl border border-sky-200 bg-white px-2.5 py-1.5 text-xs font-mono font-semibold text-slate-800 focus:border-sky-500 focus:outline-none"
-                        placeholder="0"
-                      />
+                    {/* Discount with Percentage / Flat toggle */}
+                    <div className="col-span-1">
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                          Discount
+                        </label>
+                        <div className="inline-flex rounded-lg border border-sky-200 bg-sky-100/60 p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (discountType !== 'percentage') {
+                                setDiscountType('percentage');
+                                if (discountValue && totalBeforeDiscount > 0) {
+                                  setDiscountValue(effectiveDiscountPercent);
+                                }
+                              }
+                            }}
+                            className={`px-1.5 py-0.5 text-[9px] font-extrabold rounded-md transition-all ${
+                              discountType === 'percentage'
+                                ? 'bg-sky-600 text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                            title="Percentage Discount (%)"
+                          >
+                            %
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (discountType !== 'flat') {
+                                setDiscountType('flat');
+                                if (discountValue && totalBeforeDiscount > 0) {
+                                  setDiscountValue(discountAmt);
+                                }
+                              }
+                            }}
+                            className={`px-1.5 py-0.5 text-[9px] font-extrabold rounded-md transition-all ${
+                              discountType === 'flat'
+                                ? 'bg-sky-600 text-white shadow-xs'
+                                : 'text-slate-600 hover:text-slate-900'
+                            }`}
+                            title="Flat Rupee Amount Discount (₹)"
+                          >
+                            ₹ Flat
+                          </button>
+                        </div>
+                      </div>
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                          {discountType === 'flat' ? '₹' : '%'}
+                        </span>
+                        <input
+                          type="number"
+                          onWheel={(e) => e.target.blur()}
+                          onKeyDown={(e) => ['-', '+', 'e', 'E'].includes(e.key) && e.preventDefault()}
+                          min="0"
+                          max={discountType === 'percentage' ? 100 : totalBeforeDiscount}
+                          step={discountType === 'percentage' ? '0.5' : '1'}
+                          value={discountValue}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (val === '') setDiscountValue('');
+                            else {
+                              const num = Number(val);
+                              if (discountType === 'percentage') {
+                                setDiscountValue(Math.min(100, Math.max(0, num)));
+                              } else {
+                                setDiscountValue(Math.max(0, num));
+                              }
+                            }
+                          }}
+                          className="w-full pl-7 pr-2.5 py-1.5 rounded-xl border border-sky-200 bg-white text-xs font-mono font-semibold text-slate-800 focus:border-sky-500 focus:outline-none"
+                          placeholder="0"
+                        />
+                      </div>
                     </div>
 
                     {/* Due Date */}

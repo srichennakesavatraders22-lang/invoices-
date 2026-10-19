@@ -11,13 +11,14 @@
   },
   "main": "dist-electron/main.js",
   "scripts": {
-    "start": "vite",
     "dev": "vite",
+    "start": "vite",
     "build": "vite build",
-    "electron:build": "vite build && electron-builder",
-    "preview:exe": "vite build && electron-builder --dir -c.win.icon=null",
-    "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron:dev": "cross-env ELECTRON=true electron-vite dev || set ELECTRON=true&& vite & timeout /t 3 && electron .",
+    "electron:build": "cross-env ELECTRON=true vite build && electron-builder",
+    "preview:exe": "cross-env ELECTRON=true vite build && electron-builder --dir -c.win.icon=null",
+    "lint": "oxlint"
   },
   "build": {
     "appId": "com.srichennakesava.invoice",
@@ -61,6 +62,7 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^6.1.1",
+    "cross-env": "^10.1.0",
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
     "oxlint": "^1.81.0",

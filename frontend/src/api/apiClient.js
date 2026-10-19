@@ -17,15 +17,10 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor — auto-logout on 401
+// Response interceptor — do NOT auto-logout; token persists until manual logout
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.hash = '/login';
-    }
     const message =
       error.response?.data?.message || error.message || 'Something went wrong. Please try again.';
     return Promise.reject(new Error(message));
@@ -53,6 +48,7 @@ export const productsAPI = {
   create: (data) => api.post('/products', data),
   update: (id, data) => api.put(`/products/${id}`, data),
   delete: (id) => api.delete(`/products/${id}`),
+  bulkDelete: (ids) => api.post('/products/bulk-delete', { ids }),
   updateStock: (id, data) => api.patch(`/products/${id}/stock`, data),
   uploadImage: (id, formData) =>
     api.post(`/products/${id}/upload-image`, formData, {
@@ -60,6 +56,7 @@ export const productsAPI = {
     }),
   getExportUrl: () => `${import.meta.env.VITE_API_URL || ''}/api/products/export/excel`,
   getTemplateUrl: () => `${import.meta.env.VITE_API_URL || ''}/api/products/import/template`,
+  getSampleUrl: () => `${import.meta.env.VITE_API_URL || ''}/api/products/import/sample`,
   bulkImport: (formData) =>
     api.post('/products/import/excel', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },

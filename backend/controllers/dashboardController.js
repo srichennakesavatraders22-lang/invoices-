@@ -26,16 +26,46 @@ export const getDashboardStats = async (req, res, next) => {
       dateMatch.createdAt = { $gte: startOfMonth };
     }
 
-    // 1. Total invoiced in range
+    // 1. Total invoiced in range (all active non-cancelled invoices)
     const rangeInvoices = await Invoice.aggregate([
       { $match: { ...dateMatch, status: { $ne: 'Cancelled' } } },
-      { $group: { _id: null, totalAmount: { $sum: '$grandTotal' }, count: { $sum: 1 } } },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: '$grandTotal' },
+          totalSubTotal: { $sum: '$subTotal' },
+          totalTax: { $sum: '$totalGst' },
+          count: { $sum: 1 },
+        },
+      },
     ]);
 
-    // 2. Outstanding amount in range
+    // 1b. Settled & Paid Revenue in range (REALIZED revenue: only when status is 'Paid')
+    const paidInvoices = await Invoice.aggregate([
+      { $match: { ...dateMatch, status: 'Paid' } },
+      {
+        $group: {
+          _id: null,
+          settledTotal: { $sum: '$grandTotal' },
+          settledSubTotal: { $sum: '$subTotal' }, // Pre-tax product selling revenue
+          settledTax: { $sum: '$totalGst' },      // GST collected on paid invoices
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // 2. Outstanding receivables in range (unsettled: Draft, Sent, Overdue)
     const outstandingAggregate = await Invoice.aggregate([
       { $match: { ...dateMatch, status: { $in: ['Draft', 'Sent', 'Overdue'] } } },
-      { $group: { _id: null, outstandingAmount: { $sum: '$grandTotal' }, count: { $sum: 1 } } },
+      {
+        $group: {
+          _id: null,
+          outstandingAmount: { $sum: '$grandTotal' },
+          outstandingSubTotal: { $sum: '$subTotal' },
+          outstandingTax: { $sum: '$totalGst' },
+          count: { $sum: 1 },
+        },
+      },
     ]);
 
     // 3. Overall counts in range
@@ -47,23 +77,23 @@ export const getDashboardStats = async (req, res, next) => {
     // 4. Total stock value
     const stockAggregate = await Product.aggregate([
       { $match: { isActive: true } },
-      { $group: { _id: null, totalStock: { $sum: '$stock' }, totalValue: { $sum: { $multiply: ['$stock', '$mrp'] } } } },
+      { $group: { _id: null, totalStock: { $sum: '$stockPieces' }, totalValue: { $sum: { $multiply: ['$stockPieces', '$piecePrice'] } } } },
     ]);
 
-    // 5. Top-selling SKUs
+    // 5. Top-selling SKUs (Revenue excluding GST)
     const topSkus = await Invoice.aggregate([
       { $match: { status: { $ne: 'Cancelled' } } },
       { $unwind: '$items' },
-      { $group: { _id: '$items.itemName', totalQty: { $sum: '$items.qty' }, totalRevenue: { $sum: '$items.amount' } } },
+      { $group: { _id: '$items.itemName', totalQty: { $sum: '$items.qty' }, totalRevenue: { $sum: { $ifNull: ['$items.taxableAmount', '$items.amount'] } } } },
       { $sort: { totalQty: -1 } },
       { $limit: 6 },
     ]);
 
-    // 5b. Slow-moving SKUs
+    // 5b. Slow-moving SKUs (Revenue excluding GST)
     const slowMovers = await Invoice.aggregate([
       { $match: { status: { $ne: 'Cancelled' } } },
       { $unwind: '$items' },
-      { $group: { _id: '$items.itemName', totalQty: { $sum: '$items.qty' }, totalRevenue: { $sum: '$items.amount' } } },
+      { $group: { _id: '$items.itemName', totalQty: { $sum: '$items.qty' }, totalRevenue: { $sum: { $ifNull: ['$items.taxableAmount', '$items.amount'] } } } },
       { $sort: { totalQty: 1 } },
       { $limit: 6 },
     ]);
@@ -77,8 +107,8 @@ export const getDashboardStats = async (req, res, next) => {
     // 7. Low stock products
     const lowStockProducts = await Product.find({
       isActive: true,
-      $expr: { $lte: ['$stock', '$minStock'] },
-    }).sort({ stock: 1 }).limit(10).select('name category stock minStock unit');
+      $expr: { $lte: ['$stockPieces', '$minStockPieces'] },
+    }).sort({ stockPieces: 1 }).limit(10).select('name category stockPieces minStockPieces piecesPerBox boxesPerCarton boxesPerCotton');
 
     // 8. Expiry alerts
     const in7Days = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
@@ -88,7 +118,7 @@ export const getDashboardStats = async (req, res, next) => {
     const expiryAlerts = await Product.find({
       isActive: true,
       expiryDate: { $ne: null, $lte: in30Days },
-    }).sort({ expiryDate: 1 }).limit(10).select('name category stock expiryDate unit');
+    }).sort({ expiryDate: 1 }).limit(10).select('name category stockPieces expiryDate piecesPerBox boxesPerCarton boxesPerCotton');
 
     const expiredProducts = await Product.find({
       isActive: true,
@@ -134,9 +164,22 @@ export const getDashboardStats = async (req, res, next) => {
       success: true,
       data: {
         totalInvoicedThisMonth: rangeInvoices[0]?.totalAmount || 0,
+        invoicedOriginalAmount: rangeInvoices[0]?.totalSubTotal || 0,
+        invoicedTaxAmount: rangeInvoices[0]?.totalTax || 0,
         thisMonthCount: rangeInvoices[0]?.count || 0,
+
+        // Realized settled metrics (only when Paid)
+        settledRevenueTotal: paidInvoices[0]?.settledTotal || 0,
+        settledOriginalAmount: paidInvoices[0]?.settledSubTotal || 0,
+        settledTaxAmount: paidInvoices[0]?.settledTax || 0,
+        settledCount: paidInvoices[0]?.count || 0,
+
+        // Outstanding receivables (Draft, Sent, Overdue)
         outstandingAmount: outstandingAggregate[0]?.outstandingAmount || 0,
+        outstandingOriginalAmount: outstandingAggregate[0]?.outstandingSubTotal || 0,
+        outstandingTaxAmount: outstandingAggregate[0]?.outstandingTax || 0,
         pendingInvoicesCount: outstandingAggregate[0]?.count || 0,
+
         totalInvoicesCount,
         totalPaidInvoices,
         totalProductsCount,
@@ -234,14 +277,28 @@ export const getAnalytics = async (req, res, next) => {
       sortCondition = { '_id.year': 1, '_id.month': 1 };
     }
 
-    // Revenue for selected range
+    // Revenue for selected range (tracking pre-tax product sales, GST, and settled/paid status)
     const monthlyRevenue = await Invoice.aggregate([
       { $match: baseMatch },
       {
         $group: {
           _id: groupCondition,
           revenue: { $sum: '$grandTotal' },
+          originalRevenue: { $sum: '$subTotal' },
+          taxAmount: { $sum: '$totalGst' },
+          settledRevenue: {
+            $sum: { $cond: [{ $eq: ['$status', 'Paid'] }, '$grandTotal', 0] },
+          },
+          settledOriginalRevenue: {
+            $sum: { $cond: [{ $eq: ['$status', 'Paid'] }, '$subTotal', 0] },
+          },
+          settledTaxAmount: {
+            $sum: { $cond: [{ $eq: ['$status', 'Paid'] }, '$totalGst', 0] },
+          },
           invoiceCount: { $sum: 1 },
+          paidCount: {
+            $sum: { $cond: [{ $eq: ['$status', 'Paid'] }, 1, 0] },
+          },
           totalBoxes: { $sum: '$totalQty' },
         },
       },
@@ -267,13 +324,19 @@ export const getAnalytics = async (req, res, next) => {
       return {
         month: label,
         revenue: m.revenue,
+        originalRevenue: m.originalRevenue,
+        taxAmount: m.taxAmount,
+        settledRevenue: m.settledRevenue,
+        settledOriginalRevenue: m.settledOriginalRevenue,
+        settledTaxAmount: m.settledTaxAmount,
         invoiceCount: m.invoiceCount,
+        paidCount: m.paidCount,
         totalBoxes: m.totalBoxes,
         colorIndex: idx, // used for multi-color bars on frontend
       };
     });
 
-    // Top SKUs (for pie chart)
+    // Top SKUs (for pie chart - sales revenue excluding GST)
     const topSkusPie = await Invoice.aggregate([
       { $match: baseMatch },
       { $unwind: '$items' },
@@ -281,14 +344,14 @@ export const getAnalytics = async (req, res, next) => {
         $group: {
           _id: '$items.itemName',
           totalQty: { $sum: '$items.qty' },
-          totalRevenue: { $sum: '$items.amount' },
+          totalRevenue: { $sum: { $ifNull: ['$items.taxableAmount', '$items.amount'] } },
         },
       },
       { $sort: { totalRevenue: -1 } },
       { $limit: 8 },
     ]);
 
-    // Category-wise sales (pie chart)
+    // Category-wise sales (pie chart - sales revenue excluding GST)
     const categorySales = await Invoice.aggregate([
       { $match: baseMatch },
       { $unwind: '$items' },
@@ -304,7 +367,7 @@ export const getAnalytics = async (req, res, next) => {
       {
         $group: {
           _id: '$productInfo.category',
-          totalRevenue: { $sum: '$items.amount' },
+          totalRevenue: { $sum: { $ifNull: ['$items.taxableAmount', '$items.amount'] } },
           totalQty: { $sum: '$items.qty' },
         },
       },
