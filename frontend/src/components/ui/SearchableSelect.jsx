@@ -33,36 +33,48 @@ export default function SearchableSelect({
   };
 
   const handleClose = (e) => {
-    if (e) {
+    if (e && e.preventDefault) {
       e.preventDefault();
       e.stopPropagation();
     }
-    if (document.activeElement) {
+    if (document.activeElement && document.activeElement.blur) {
       document.activeElement.blur();
     }
     setIsOpen(false);
   };
 
-  // Focus search input when opened
+  // Manage desktop positioning and focus
   useEffect(() => {
     if (isOpen) {
       setSearchTerm('');
       updateCoords();
-      window.addEventListener('scroll', updateCoords, true);
-      window.addEventListener('resize', updateCoords);
-      setTimeout(() => {
-        if (searchInputRef.current) {
-          searchInputRef.current.focus();
-        }
-      }, 50);
+
+      // Only listen to window-level scroll without capture so modal list scrolling does not trigger re-renders
+      const handleWindowScroll = () => {
+        updateCoords();
+      };
+      window.addEventListener('scroll', handleWindowScroll);
+      window.addEventListener('resize', handleWindowScroll);
+
+      // On desktop, auto-focus search input. On mobile, do NOT force focus
+      // so virtual keyboard doesn't open immediately and block scrolling of the list
+      const isMobile = window.innerWidth < 640;
+      if (!isMobile) {
+        setTimeout(() => {
+          if (searchInputRef.current) {
+            searchInputRef.current.focus();
+          }
+        }, 50);
+      }
+
       return () => {
-        window.removeEventListener('scroll', updateCoords, true);
-        window.removeEventListener('resize', updateCoords);
+        window.removeEventListener('scroll', handleWindowScroll);
+        window.removeEventListener('resize', handleWindowScroll);
       };
     }
   }, [isOpen]);
 
-  // Close on outside click
+  // Close on outside click (for desktop)
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (
@@ -90,7 +102,7 @@ export default function SearchableSelect({
 
   const handleSelect = (val) => {
     onChange(val);
-    handleClose();
+    setIsOpen(false);
   };
 
   const handleClear = (e) => {
@@ -130,11 +142,6 @@ export default function SearchableSelect({
               role="button"
               tabIndex={0}
               onClick={handleClear}
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                onChange('');
-              }}
               className="p-0.5 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors"
               title="Clear selection"
             >
@@ -155,55 +162,59 @@ export default function SearchableSelect({
           <div className="searchable-select-portal">
             {/* Mobile backdrop */}
             <div
-              className="fixed inset-0 z-[99998] bg-slate-950/50 backdrop-blur-xs sm:hidden"
-              onPointerDown={handleClose}
+              className="fixed inset-0 z-[99998] bg-slate-950/60 backdrop-blur-xs sm:hidden"
               onClick={handleClose}
             />
 
             {/* Mobile Bottom Sheet Modal */}
-            <div className="fixed inset-x-2 bottom-2 z-[99999] max-h-[85vh] flex flex-col rounded-2xl bg-white shadow-2xl border border-sky-100 sm:hidden animate-in fade-in duration-100">
-              <div className="flex items-center justify-between px-3.5 py-2.5 border-b border-slate-100 bg-slate-50/80 rounded-t-2xl">
+            <div 
+              className="fixed inset-x-0 bottom-0 z-[99999] max-h-[85vh] flex flex-col rounded-t-3xl bg-white shadow-2xl border-t border-sky-100 sm:hidden animate-in slide-in-from-bottom duration-150"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header with Title & X button */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50/90 rounded-t-3xl">
                 <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
                   {title}
                 </span>
                 <button
                   type="button"
-                  onPointerDown={handleClose}
                   onClick={handleClose}
-                  className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-200 active:bg-slate-300"
+                  className="p-1.5 -mr-1 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-200 active:bg-slate-300 transition-colors"
                   title="Close"
                 >
-                  <X className="h-4 w-4" />
+                  <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <div className="p-2.5 border-b border-sky-100 bg-sky-50/50">
+              {/* Search Bar */}
+              <div className="p-3 border-b border-sky-100 bg-sky-50/40">
                 <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-sky-500" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-sky-500" />
                   <input
                     ref={searchInputRef}
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     placeholder={searchPlaceholder}
-                    className="w-full rounded-xl border border-sky-200 bg-white pl-9 pr-8 py-2 text-xs text-slate-800 placeholder-slate-400 focus:border-sky-500 focus:outline-none"
+                    className="w-full rounded-xl border border-sky-200 bg-white pl-9 pr-9 py-2 text-xs text-slate-800 placeholder-slate-400 focus:border-sky-500 focus:outline-none"
                   />
                   {searchTerm && (
                     <button
                       type="button"
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        setSearchTerm('');
-                      }}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600"
+                      onClick={() => setSearchTerm('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600"
                     >
-                      <X className="h-3.5 w-3.5" />
+                      <X className="h-4 w-4" />
                     </button>
                   )}
                 </div>
               </div>
 
-              <div className="overflow-y-auto divide-y divide-slate-100 flex-1 overscroll-contain">
+              {/* Scrollable Items List - Standard touch scrolling with onClick only (no pointerdown) */}
+              <div 
+                className="overflow-y-auto divide-y divide-slate-100 flex-1 overscroll-contain touch-pan-y pb-6"
+                style={{ WebkitOverflowScrolling: 'touch' }}
+              >
                 {filteredOptions.length > 0 ? (
                   filteredOptions.map((opt) => {
                     const isSelected = String(opt.value) === String(value);
@@ -211,10 +222,9 @@ export default function SearchableSelect({
                       <button
                         key={opt.value}
                         type="button"
-                        onPointerDown={() => handleSelect(opt.value)}
                         onClick={() => handleSelect(opt.value)}
-                        className={`w-full text-left px-3.5 py-2.5 flex items-start justify-between gap-2 transition-colors ${
-                          isSelected ? 'bg-sky-50/80 text-sky-950 font-bold' : 'hover:bg-slate-50 text-slate-800 active:bg-sky-50/40'
+                        className={`w-full text-left px-4 py-3 flex items-start justify-between gap-2 transition-colors ${
+                          isSelected ? 'bg-sky-50/80 text-sky-950 font-bold' : 'hover:bg-slate-50 text-slate-800 active:bg-sky-50/50'
                         }`}
                       >
                         <div className="flex-1 min-w-0">
@@ -241,7 +251,7 @@ export default function SearchableSelect({
                     );
                   })
                 ) : (
-                  <div className="p-5 text-center text-xs text-slate-400 italic">
+                  <div className="p-6 text-center text-xs text-slate-400 italic">
                     {emptyText}
                   </div>
                 )}
