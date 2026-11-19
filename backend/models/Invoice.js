@@ -11,6 +11,10 @@ const invoiceItemSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  hsnCode: {
+    type: String,
+    default: '',
+  },
   packType: {
     type: String,
     default: '',

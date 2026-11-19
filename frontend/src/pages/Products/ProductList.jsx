@@ -23,6 +23,9 @@ export const DEFAULT_FLAVOURS = [
 ];
 
 export const DEFAULT_PACK_TYPES = [
+  'Pilo',
+  'Sheet',
+  'Bundle',
   '24-pack',
   '18-pack',
   '20-pack',
@@ -36,6 +39,42 @@ export const DEFAULT_PACK_TYPES = [
   'Jumbo',
   'Family Pack',
 ];
+
+export const getPackUnitInfo = (packType) => {
+  if (!packType) return { singular: 'Box', plural: 'Boxes' };
+  const pt = packType.trim();
+  const lower = pt.toLowerCase();
+  if (lower === 'pilo' || lower === 'pillos' || lower === 'pillow' || lower === 'pillows') {
+    return { singular: 'Sheet', plural: 'Sheets' };
+  }
+  if (lower === 'sheet' || lower === 'sheets') {
+    return { singular: 'Sheet', plural: 'Sheets' };
+  }
+  if (lower === 'bundle' || lower === 'bundles') {
+    return { singular: 'Bundle', plural: 'Bundles' };
+  }
+  if (lower === 'jar' || lower === 'jars') {
+    return { singular: 'Jar', plural: 'Jars' };
+  }
+  if (lower === 'packet' || lower === 'pkt' || lower === 'packets') {
+    return { singular: 'Packet', plural: 'Packets' };
+  }
+  if (lower === 'tray' || lower === 'trays') {
+    return { singular: 'Tray', plural: 'Trays' };
+  }
+  if (lower === 'tin' || lower === 'tins') {
+    return { singular: 'Tin', plural: 'Tins' };
+  }
+  if (lower === 'pouch' || lower === 'pouches') {
+    return { singular: 'Pouch', plural: 'Pouches' };
+  }
+  if (lower === 'box' || lower === 'boxes' || lower.includes('pack')) {
+    return { singular: 'Box', plural: 'Boxes' };
+  }
+  const singular = pt.charAt(0).toUpperCase() + pt.slice(1);
+  const plural = singular.endsWith('s') ? singular : `${singular}s`;
+  return { singular, plural };
+};
 
 const EMPTY_FORM = {
   name: '',
@@ -59,12 +98,13 @@ const EMPTY_FORM = {
 // Validation rules
 const validateProductForm = (data) => {
   const errors = {};
+  const unitInfo = getPackUnitInfo(data.packType);
   if (!data.name.trim()) errors.name = 'Product name is required';
   if (!data.category.trim()) errors.category = 'Flavour is required';
   if (!data.packType.trim()) errors.packType = 'Pack type is required';
   if (!data.piecePrice || Number(data.piecePrice) < 0) errors.piecePrice = 'Piece price must be 0 or more';
-  if (!data.piecesPerBox || Number(data.piecesPerBox) < 1) errors.piecesPerBox = 'Pieces per box must be at least 1';
-  if (!data.boxesPerCarton || Number(data.boxesPerCarton) < 1) errors.boxesPerCarton = 'Boxes per carton must be at least 1';
+  if (!data.piecesPerBox || Number(data.piecesPerBox) < 1) errors.piecesPerBox = `Pieces per ${unitInfo.singular.toLowerCase()} must be at least 1`;
+  if (!data.boxesPerCarton || Number(data.boxesPerCarton) < 1) errors.boxesPerCarton = `${unitInfo.plural} per carton must be at least 1`;
   if (Number(data.stockPieces) < 0) errors.stockPieces = 'Stock cannot be negative';
   if (Number(data.minStockPieces) < 0) errors.minStockPieces = 'Min stock cannot be negative';
   if (data.expiryDate) {
@@ -114,6 +154,7 @@ export const ProductList = () => {
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [viewingProduct, setViewingProduct] = useState(null);
+  const viewUnitInfo = getPackUnitInfo(viewingProduct?.packType);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [saving, setSaving] = useState(false);
   const [formErrors, setFormErrors] = useState({});
@@ -187,6 +228,7 @@ export const ProductList = () => {
 
   // Form State
   const [formData, setFormData] = useState(EMPTY_FORM);
+  const formUnitInfo = getPackUnitInfo(formData.packType);
 
   // Custom Flavours & Pack Types State (with LocalStorage persistence)
   const [customFlavours, setCustomFlavours] = useState(() => {
@@ -1140,11 +1182,11 @@ export const ProductList = () => {
                 <th className="py-3.5">Flavour</th>
                 <th className="py-3.5">Pack Type</th>
                 <th className={`py-3.5 text-center transition-colors ${stockMode === 'Pieces' ? 'text-sky-700 font-black bg-sky-100/60 rounded-t-lg' : ''}`}>Stock (Pcs)</th>
-                <th className={`py-3.5 text-center transition-colors ${stockMode === 'Boxes' ? 'text-sky-700 font-black bg-sky-100/60 rounded-t-lg' : ''}`}>Boxes</th>
+                <th className={`py-3.5 text-center transition-colors ${stockMode === 'Boxes' ? 'text-sky-700 font-black bg-sky-100/60 rounded-t-lg' : ''}`}>Boxes / Sheets</th>
                 <th className={`py-3.5 text-center transition-colors ${stockMode === 'Cartons' ? 'text-sky-700 font-black bg-sky-100/60 rounded-t-lg' : ''}`}>Cartons</th>
                 <th className="py-3.5 text-center hidden md:table-cell">Exp Date</th>
                 <th className="py-3.5 text-right">Piece Price</th>
-                <th className="py-3.5 text-right">Box Price</th>
+                <th className="py-3.5 text-right">Box / Sheet Price</th>
                 <th className="py-3.5 text-right">Carton Price</th>
                 <th className="py-3.5 text-center hidden lg:table-cell">GST</th>
                 <th className="py-3.5 text-center hidden xl:table-cell">HSN</th>
@@ -1234,9 +1276,17 @@ export const ProductList = () => {
                           )}
                         </div>
                       </td>
-                      {/* Boxes */}
+                      {/* Boxes / Sheets */}
                       <td className={`py-3 text-center text-xs transition-colors ${stockMode === 'Boxes' ? 'bg-sky-50/60 font-black text-sky-800 font-mono text-sm' : 'font-semibold text-slate-700'}`}>
-                        {prod.stockBoxes ?? Math.floor((prod.stockPieces ?? 0) / (prod.piecesPerBox || 1))}
+                        {(() => {
+                          const unit = getPackUnitInfo(prod.packType);
+                          const count = prod.stockBoxes ?? Math.floor((prod.stockPieces ?? 0) / (prod.piecesPerBox || 1));
+                          return (
+                            <span>
+                              {count} <span className="text-[10px] text-slate-400 font-normal">{unit.plural}</span>
+                            </span>
+                          );
+                        })()}
                       </td>
                       {/* Cartons */}
                       <td className={`py-3 text-center text-xs transition-colors ${stockMode === 'Cartons' ? 'bg-sky-50/60 font-black text-sky-800 font-mono text-sm' : 'font-semibold text-slate-700'}`}>
@@ -1250,9 +1300,18 @@ export const ProductList = () => {
                       <td className="py-3 text-right font-mono font-bold text-slate-900 text-xs">
                         Rs. {Number(prod.piecePrice ?? 0).toFixed(2)}
                       </td>
-                      {/* Box Price */}
+                      {/* Box / Sheet Price */}
                       <td className="py-3 text-right font-mono font-bold text-teal-600 text-xs">
-                        Rs. {prod.boxPrice ?? (Number(prod.piecesPerBox || 1) * Number(prod.piecePrice || 0)).toFixed(2)}
+                        {(() => {
+                          const unit = getPackUnitInfo(prod.packType);
+                          const price = prod.boxPrice ?? (Number(prod.piecesPerBox || 1) * Number(prod.piecePrice || 0)).toFixed(2);
+                          return (
+                            <span>
+                              Rs. {price}
+                              <span className="block text-[8.5px] text-slate-400 font-normal">/{unit.singular.toLowerCase()}</span>
+                            </span>
+                          );
+                        })()}
                       </td>
                       {/* Carton Price */}
                       <td className="py-3 text-right font-mono font-bold text-purple-600 text-xs">
@@ -1478,9 +1537,11 @@ export const ProductList = () => {
                 </div>
               </div>
 
-              {/* ─── Row 2: Piece Price, Pieces Per Box, Boxes Per Carton ─── */}
+              {/* ─── Row 2: Piece Price, Pieces Per Box/Sheet, Boxes/Sheets Per Carton ─── */}
               <div>
-                <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-3">Pricing & Box Configuration</p>
+                <p className="text-[10px] font-black uppercase tracking-wider text-slate-500 mb-3">
+                  Pricing & {formUnitInfo.singular} Configuration
+                </p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-600 mb-1">Piece Price (Rs.) *</label>
@@ -1497,7 +1558,9 @@ export const ProductList = () => {
                     {formErrors.piecePrice && <p className="text-[10px] text-red-500 mt-0.5">⚠ {formErrors.piecePrice}</p>}
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Pieces Per Box *</label>
+                    <label className="block text-xs font-bold text-slate-600 mb-1">
+                      Pieces Per {formUnitInfo.singular} *
+                    </label>
                     <input
                       type="number" onWheel={(e) => e.target.blur()}
                       onKeyDown={(e) => ['-', '+', 'e', 'E'].includes(e.key) && e.preventDefault()}
@@ -1510,12 +1573,14 @@ export const ProductList = () => {
                     {formErrors.piecesPerBox && <p className="text-[10px] text-red-500 mt-0.5">⚠ {formErrors.piecesPerBox}</p>}
                     {formData.piecePrice > 0 && formData.piecesPerBox > 0 && (
                       <p className="text-[10px] text-teal-600 font-bold mt-1">
-                        Box Price = Rs. {(Number(formData.piecePrice) * Number(formData.piecesPerBox)).toFixed(2)}
+                        {formUnitInfo.singular} Price = Rs. {(Number(formData.piecePrice) * Number(formData.piecesPerBox)).toFixed(2)}
                       </p>
                     )}
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-600 mb-1">Boxes Per Carton *</label>
+                    <label className="block text-xs font-bold text-slate-600 mb-1">
+                      {formUnitInfo.plural} Per Carton *
+                    </label>
                     <input
                       type="number" onWheel={(e) => e.target.blur()}
                       onKeyDown={(e) => ['-', '+', 'e', 'E'].includes(e.key) && e.preventDefault()}
@@ -1572,11 +1637,11 @@ export const ProductList = () => {
                           className="w-full rounded-xl border border-sky-300 bg-white px-3 py-2 text-sm font-mono font-black text-sky-950 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200"
                         />
                       </div>
-                      {/* Auto-Calculated Boxes Badge */}
+                      {/* Auto-Calculated Boxes/Sheets Badge */}
                       <div className="bg-white/90 p-2.5 rounded-xl border border-sky-100 shadow-2xs">
-                        <p className="text-[10px] uppercase font-bold text-sky-700">Auto-Calculated Boxes</p>
+                        <p className="text-[10px] uppercase font-bold text-sky-700">Auto-Calculated {formUnitInfo.plural}</p>
                         <p className="text-sm font-black font-mono text-sky-950 mt-0.5">
-                          {(ctns * bpc).toLocaleString('en-IN')} <span className="text-xs font-bold text-slate-500">Boxes</span>
+                          {(ctns * bpc).toLocaleString('en-IN')} <span className="text-xs font-bold text-slate-500">{formUnitInfo.plural}</span>
                         </p>
                       </div>
                       {/* Auto-Calculated Pieces Badge */}
@@ -1637,14 +1702,14 @@ export const ProductList = () => {
                         className="rounded-xl border border-sky-200 bg-white px-1.5 py-2 text-xs font-bold text-slate-700 focus:border-sky-500 focus:outline-none shrink-0"
                       >
                         <option value="cartons">Cartons</option>
-                        <option value="boxes">Boxes</option>
+                        <option value="boxes">{formUnitInfo.plural}</option>
                         <option value="pieces">Pieces</option>
                       </select>
                     </div>
                     {minStockInputVal !== '' && (
                       <p className="text-[10px] text-sky-700 font-bold mt-1">
                         {minStockUnit === 'cartons' && `= ${minStockInputVal} ${Number(minStockInputVal) === 1 ? 'Carton' : 'Cartons'}`}
-                        {minStockUnit === 'boxes' && `= ${minStockInputVal} ${Number(minStockInputVal) === 1 ? 'Box' : 'Boxes'}`}
+                        {minStockUnit === 'boxes' && `= ${minStockInputVal} ${Number(minStockInputVal) === 1 ? formUnitInfo.singular : formUnitInfo.plural}`}
                         {minStockUnit === 'pieces' && `= ${minStockInputVal} Pieces`}
                       </p>
                     )}
@@ -1870,16 +1935,16 @@ export const ProductList = () => {
                       {viewingProduct.stockCartons ?? Math.floor((viewingProduct.stockPieces || 0) / ((viewingProduct.piecesPerBox || 1) * (viewingProduct.boxesPerCarton || 12)))}
                     </p>
                     <p className="text-[9px] text-purple-500 mt-0.5">
-                      {(viewingProduct.boxesPerCarton || 12)} boxes / ctn
+                      {(viewingProduct.boxesPerCarton || 12)} {viewUnitInfo.plural.toLowerCase()} / ctn
                     </p>
                   </div>
                   <div className="bg-sky-50/70 border border-sky-100 rounded-xl p-3">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-sky-600">Stock Boxes</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-sky-600">Stock {viewUnitInfo.plural}</p>
                     <p className="text-xl font-black font-mono text-sky-900 mt-0.5">
                       {viewingProduct.stockBoxes ?? Math.floor((viewingProduct.stockPieces || 0) / (viewingProduct.piecesPerBox || 24))}
                     </p>
                     <p className="text-[9px] text-sky-500 mt-0.5">
-                      {(viewingProduct.piecesPerBox || 24)} pcs / box
+                      {(viewingProduct.piecesPerBox || 24)} pcs / {viewUnitInfo.singular.toLowerCase()}
                     </p>
                   </div>
                   <div className="bg-teal-50/70 border border-teal-100 rounded-xl p-3">
@@ -1908,7 +1973,7 @@ export const ProductList = () => {
                   <span className="text-slate-800 font-semibold">
                     <strong className="text-purple-700">{Math.floor((viewingProduct.stockPieces || 0) / ((viewingProduct.piecesPerBox || 1) * (viewingProduct.boxesPerCarton || 12)))} Cartons</strong>
                     {' '}+{' '}
-                    <strong className="text-sky-700">{Math.floor(((viewingProduct.stockPieces || 0) % ((viewingProduct.piecesPerBox || 1) * (viewingProduct.boxesPerCarton || 12))) / (viewingProduct.piecesPerBox || 1))} loose Boxes</strong>
+                    <strong className="text-sky-700">{Math.floor(((viewingProduct.stockPieces || 0) % ((viewingProduct.piecesPerBox || 1) * (viewingProduct.boxesPerCarton || 12))) / (viewingProduct.piecesPerBox || 1))} loose {viewUnitInfo.plural}</strong>
                     {' '}+{' '}
                     <strong className="text-teal-700">{(viewingProduct.stockPieces || 0) % (viewingProduct.piecesPerBox || 1)} loose Pieces</strong>
                   </span>
@@ -2044,7 +2109,7 @@ export const ProductList = () => {
               <p className="text-[10px] font-black uppercase tracking-wider text-slate-600 mb-2">Packaging Specs for Calculation</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Pieces Per Box</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Pieces Per Box / Sheet</label>
                   <input
                     type="number"
                     min="1"
@@ -2060,7 +2125,7 @@ export const ProductList = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Boxes Per Carton</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Boxes / Sheets Per Carton</label>
                   <input
                     type="number"
                     min="1"
@@ -2077,7 +2142,7 @@ export const ProductList = () => {
                 </div>
               </div>
               <p className="text-[11px] text-sky-700 font-semibold mt-2">
-                1 Carton = {(Number(calcPiecesPerBox) || 1) * (Number(calcBoxesPerCarton) || 1)} pieces | 1 Box = {Number(calcPiecesPerBox) || 1} pieces
+                1 Carton = {(Number(calcPiecesPerBox) || 1) * (Number(calcBoxesPerCarton) || 1)} pieces | 1 Box/Sheet = {Number(calcPiecesPerBox) || 1} pieces
               </p>
             </div>
 
@@ -2106,8 +2171,8 @@ export const ProductList = () => {
               {/* Boxes */}
               <div className="bg-white p-3 rounded-xl border border-sky-100 shadow-2xs">
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold text-sky-900">Boxes</label>
-                  <span className="text-[9px] font-black text-sky-600 uppercase bg-sky-50 px-1.5 py-0.5 rounded">Box</span>
+                  <label className="text-xs font-bold text-sky-900">Boxes / Sheets</label>
+                  <span className="text-[9px] font-black text-sky-600 uppercase bg-sky-50 px-1.5 py-0.5 rounded">Unit</span>
                 </div>
                 <input
                   type="number"

@@ -18,6 +18,8 @@ import {
   Maximize2,
   FileCheck,
   Zap,
+  RotateCcw,
+  X,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import confetti from 'canvas-confetti';
@@ -25,6 +27,9 @@ import { invoicesAPI, customersAPI, productsAPI, settingsAPI } from '../../api/a
 import PrintableInvoice from '../../components/invoice/PrintableInvoice';
 import numberToWordsIndian from '../../utils/amountInWords';
 import { getISTTimeString, formatISTInvoiceDate, convertTo12HourFormat, convertDateToInputFormat, convertDateFromInputFormat, convertTimeToInputFormat } from '../../utils/timeUtils';
+import SearchableSelect from '../../components/ui/SearchableSelect';
+import TimePicker from '../../components/ui/TimePicker';
+import { getPackUnitInfo, getDisplayUnit } from '../../utils/packUnitUtils';
 
 /**
  * InvoiceScaler — Scales a 760px-wide invoice to fill its container.
@@ -152,14 +157,17 @@ export const CreateEditInvoice = () => {
     let unitPrice = piecePrice;
     let totalPiecesSold = qty;
 
-    if (sellUnit === 'Box') {
-      unitPrice = Number((piecePrice * piecesPerBox).toFixed(2));
-      totalPiecesSold = qty * piecesPerBox;
-    } else if (sellUnit === 'Carton' || sellUnit === 'Cotton') {
+    if (sellUnit === 'Carton' || sellUnit === 'Cotton') {
       unitPrice = Number((piecePrice * piecesPerBox * boxesPerCarton).toFixed(2));
       totalPiecesSold = qty * piecesPerBox * boxesPerCarton;
+    } else if (sellUnit === 'Piece') {
+      unitPrice = piecePrice;
+      totalPiecesSold = qty;
+    } else {
+      // Intermediate unit: Box, Sheet, Bundle, etc.
+      unitPrice = Number((piecePrice * piecesPerBox).toFixed(2));
+      totalPiecesSold = qty * piecesPerBox;
     }
-    // sellUnit === 'Piece' -> unitPrice = piecePrice, totalPiecesSold = qty
 
     const gross = Number((qty * unitPrice).toFixed(2));
     const discountPercent = Number(row.discountPercent || 0);
@@ -229,6 +237,7 @@ export const CreateEditInvoice = () => {
             const row = {
               productId: it.product,
               productName: it.itemName,
+              hsnCode: it.hsnCode || prod.hsnCode || '',
               packType: it.packType || prod.packType || '',
               category: prod.category || '',
               sellUnit: it.sellUnit || 'Box',
@@ -254,6 +263,7 @@ export const CreateEditInvoice = () => {
           const row = {
             productId: p._id,
             productName: p.name,
+            hsnCode: p.hsnCode || '',
             packType: p.packType || '',
             category: p.category || '',
             sellUnit: 'Box',
@@ -284,8 +294,8 @@ export const CreateEditInvoice = () => {
   };
 
   const handleCustomerChange = (e) => {
-    const custId = e.target.value;
-    const cust = customers.find((c) => c._id === custId);
+    const custId = typeof e === 'object' && e?.target ? e.target.value : e;
+    const cust = customers.find((c) => String(c._id) === String(custId));
     if (cust) {
       selectCustomer(cust);
     }
@@ -293,7 +303,7 @@ export const CreateEditInvoice = () => {
 
   // Row update handlers
   const updateRowProduct = (index, productId) => {
-    const prod = products.find((p) => p._id === productId);
+    const prod = products.find((p) => String(p._id) === String(productId));
     if (!prod) return;
 
     const newItems = [...items];
@@ -304,6 +314,7 @@ export const CreateEditInvoice = () => {
     const row = {
       productId: prod._id,
       productName: prod.name,
+      hsnCode: prod.hsnCode || '',
       packType: prod.packType || '',
       category: prod.category || '',
       sellUnit,
@@ -365,6 +376,7 @@ export const CreateEditInvoice = () => {
     const row = {
       productId: defaultProduct._id,
       productName: defaultProduct.name,
+      hsnCode: defaultProduct.hsnCode || '',
       packType: defaultProduct.packType || '',
       category: defaultProduct.category || '',
       sellUnit: 'Box',
@@ -396,6 +408,7 @@ export const CreateEditInvoice = () => {
       const row = {
         productId: p._id,
         productName: p.name,
+        hsnCode: p.hsnCode || '',
         packType: p.packType || '',
         category: p.category || '',
         sellUnit: 'Box',
@@ -413,6 +426,43 @@ export const CreateEditInvoice = () => {
 
     setItems(populated);
     toast.success('Loaded reference wholesale orders!');
+  };
+
+  const handleResetAll = () => {
+    setSelectedCustomerId('');
+    setSelectedCustomer(null);
+    setShippingAddress('');
+    setSameAsBilling(true);
+    setNotes('');
+    setInvoiceDate(formatISTInvoiceDate(new Date()));
+    setInvoiceTime(getISTTimeString());
+    setPaymentMethod('');
+    setDiscountType('percentage');
+    setDiscountValue(0);
+    setDueDate('');
+    setShowMixedPayment(false);
+    setPaymentBreakdown([]);
+    if (products.length > 0) {
+      const p = products[0];
+      const row = {
+        productId: '',
+        productName: '',
+        hsnCode: '',
+        packType: '',
+        category: '',
+        sellUnit: 'Box',
+        qty: 1,
+        piecePrice: 0,
+        piecesPerBox: 1,
+        boxesPerCarton: 1,
+        boxesPerCotton: 1,
+        stockPieces: 0,
+        gstPercent: 5,
+        discountPercent: 0,
+      };
+      setItems([{ ...row, ...calculateLineAmounts(row) }]);
+    }
+    toast.success('Form cleared!');
   };
 
   // Computations
@@ -442,8 +492,28 @@ export const CreateEditInvoice = () => {
   const grandTotal = Math.max(0, Number((totalBeforeDiscount - discountAmt).toFixed(2)));
   const totalPieces = items.reduce((acc, row) => acc + (row.totalPiecesSold || 0), 0);
   const totalCartons = items.filter(r => r.sellUnit === 'Carton' || r.sellUnit === 'Cotton').reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
-  const totalBoxes = items.filter(r => r.sellUnit === 'Box').reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
+  const totalBoxes = items.filter(r => r.sellUnit === 'Box' || !r.sellUnit).reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
   const totalDirectPieces = items.filter(r => r.sellUnit === 'Piece').reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
+
+  // Group other units (e.g. Sheets for Pilo, Bundles, etc.)
+  const otherUnitCounts = {};
+  items.forEach((r) => {
+    const u = r.sellUnit || 'Box';
+    if (u === 'Carton' || u === 'Cotton' || u === 'Piece') return;
+    const unitInfo = getPackUnitInfo(r.packType, r.productName);
+    const unitName = unitInfo.plural;
+    otherUnitCounts[unitName] = (otherUnitCounts[unitName] || 0) + (Number(r.qty) || 0);
+  });
+  const otherUnitsText = Object.entries(otherUnitCounts)
+    .filter(([_, count]) => count > 0)
+    .map(([name, count]) => `${count} ${name}`)
+    .join(' ');
+  const totalUnitsOverview = [
+    totalCartons > 0 ? `${totalCartons} Cartons` : null,
+    otherUnitsText || (totalBoxes > 0 ? `${totalBoxes} Boxes` : null),
+    totalDirectPieces > 0 ? `${totalDirectPieces} Pcs` : null,
+  ].filter(Boolean).join(' / ') || `${totalBoxes} Boxes`;
+
   const liveAmountInWords = numberToWordsIndian(grandTotal);
 
   // Date format validator: DD-MM-YYYY
@@ -484,6 +554,7 @@ export const CreateEditInvoice = () => {
 
   const getAvailableStockText = (prod, unit) => {
     if (!prod) return '0 pcs';
+    const unitInfo = getPackUnitInfo(prod.packType, prod.name);
     const pieces = Number(prod.stockPieces ?? 0);
     const ppb = Number(prod.piecesPerBox || 1);
     const bpc = Number(prod.boxesPerCarton || prod.boxesPerCotton || 1);
@@ -493,9 +564,9 @@ export const CreateEditInvoice = () => {
       const cartons = Math.floor(pieces / ppc);
       return `${cartons} cartons`;
     }
-    if (unit === 'Box') {
+    if (unit === 'Box' || unit === unitInfo.singular) {
       const boxes = Math.floor(pieces / ppb);
-      return `${boxes} boxes`;
+      return `${boxes} ${unitInfo.plural.toLowerCase()}`;
     }
     return `${pieces} pcs`;
   };
@@ -534,6 +605,7 @@ export const CreateEditInvoice = () => {
     items: items.map((it) => ({
       _id: it.productId,
       itemName: it.productName || 'Selected Item',
+      hsnCode: it.hsnCode || '',
       packType: it.packType || '',
       sellUnit: it.sellUnit || 'Box',
       qty: it.qty,
@@ -583,6 +655,7 @@ export const CreateEditInvoice = () => {
       qty: it.qty,
       sellUnit: it.sellUnit || 'Box',
       piecePrice: it.piecePrice,
+      hsnCode: it.hsnCode || '',
       discountPercent: it.discountPercent || 0,
     }));
 
@@ -658,40 +731,63 @@ export const CreateEditInvoice = () => {
     );
   }
 
+  // Pre-calculated options for hybrid SearchableSelect components
+  const customerOptions = customers.map((c) => {
+    const shortArea = c.billingAddress ? c.billingAddress.split(',')[0].trim() : '';
+    return {
+      value: c._id,
+      label: c.businessName || c.name || 'Store',
+      sublabel: `${c.name && c.name !== c.businessName ? `${c.name} • ` : ''}${c.billingAddress || ''}`,
+      badge: shortArea || (c.city || null),
+      searchString: `${c.businessName || ''} ${c.name || ''} ${c.billingAddress || ''} ${c.mobile || ''} ${c.gstin || ''}`
+    };
+  });
+
+  const productOptions = products.map((p) => {
+    const pack = p.packType || '';
+    const unitPrice = Number(p.piecePrice ?? 0).toFixed(2);
+    return {
+      value: p._id,
+      label: p.name,
+      sublabel: `${p.category ? `${p.category} • ` : ''}${pack ? `${pack} • ` : ''}Rs. ${unitPrice}/pc`,
+      badge: `${p.stockPieces ?? 0} pcs`,
+      searchString: `${p.name} ${p.category || ''} ${pack} ${p.hsnCode || ''}`
+    };
+  });
+
   return (
-    <div className="space-y-5 pb-16">
+    <div className="space-y-4 pb-20 sm:pb-16">
       {/* Top Header & Layout Controls */}
-      <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-2.5 sm:gap-4">
+        <div className="flex items-center gap-2.5 sm:gap-3">
           <button
             onClick={() => navigate('/invoices')}
-            className="rounded-xl border border-sky-100 bg-white/90 p-2.5 text-slate-600 hover:bg-sky-50 hover:text-sky-600 shadow-xs transition-all"
+            className="rounded-xl border border-sky-100 bg-white/90 p-2 sm:p-2.5 text-slate-600 hover:bg-sky-50 hover:text-sky-600 shadow-xs transition-all shrink-0"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
           </button>
-          <div>
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2">
-              <FileText className="h-6 w-6 text-sky-500" />
-              {isEditMode ? 'Edit Tax Invoice' : 'Dynamic Tax Invoice Generator'}
+          <div className="min-w-0">
+            <h1 className="text-base sm:text-2xl font-black tracking-tight text-slate-900 flex items-center gap-1.5 sm:gap-2">
+              <FileText className="h-5 w-5 sm:h-6 sm:w-6 text-sky-500 shrink-0" />
+              <span className="truncate">{isEditMode ? 'Edit Tax Invoice' : 'Tax Invoice Generator'}</span>
             </h1>
-            <p className="text-xs font-medium text-slate-500">
-              Sri Chenna Kesava Traders — Official GST Wholesale Billing Engine
+            <p className="text-[11px] sm:text-xs font-medium text-slate-500 truncate">
+              Sri Chenna Kesava Traders — Official GST Billing Engine
             </p>
           </div>
         </div>
 
         {/* View Switcher & Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {/* Layout Mode Pill Selector (Desktop only) */}
-          <div className="hidden lg:flex items-center rounded-xl bg-white border border-sky-100 p-1 shadow-xs">
+          <div className="hidden lg:flex items-center rounded-xl bg-white border border-sky-100 p-0.5 shadow-xs">
             <button
               type="button"
               onClick={() => setViewMode('split')}
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
-                viewMode === 'split'
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${viewMode === 'split'
                   ? 'bg-sky-500 text-white shadow-xs'
                   : 'text-slate-600 hover:text-sky-600 hover:bg-sky-50'
-              }`}
+                }`}
               title="Side-by-Side: Builder + Live Tax Invoice"
             >
               <Columns className="h-3.5 w-3.5" />
@@ -700,11 +796,10 @@ export const CreateEditInvoice = () => {
             <button
               type="button"
               onClick={() => setViewMode('form')}
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
-                viewMode === 'form'
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${viewMode === 'form'
                   ? 'bg-sky-500 text-white shadow-xs'
                   : 'text-slate-600 hover:text-sky-600 hover:bg-sky-50'
-              }`}
+                }`}
               title="Maximize Builder Form"
             >
               <FileCheck className="h-3.5 w-3.5" />
@@ -713,11 +808,10 @@ export const CreateEditInvoice = () => {
             <button
               type="button"
               onClick={() => setViewMode('preview')}
-              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${
-                viewMode === 'preview'
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition-all ${viewMode === 'preview'
                   ? 'bg-sky-500 text-white shadow-xs'
                   : 'text-slate-600 hover:text-sky-600 hover:bg-sky-50'
-              }`}
+                }`}
               title="Full Tax Invoice Sheet"
             >
               <Eye className="h-3.5 w-3.5" />
@@ -728,19 +822,30 @@ export const CreateEditInvoice = () => {
           <button
             type="button"
             onClick={loadReferenceInvoiceSKUs}
-            className="flex items-center gap-1.5 rounded-xl border border-sky-200 bg-white/90 px-3 py-2 text-xs font-bold text-sky-600 hover:bg-sky-50 shadow-xs transition-all"
+            className="flex items-center gap-1 rounded-xl border border-sky-200 bg-white/90 px-2.5 py-1.5 text-xs font-bold text-sky-600 hover:bg-sky-50 shadow-2xs transition-all"
             title="Populate 16 reference SKUs matching the sample invoice PDF"
           >
-            <Sparkles className="h-4 w-4 text-sky-500" />
+            <Sparkles className="h-3.5 w-3.5 text-sky-500" />
             <span className="hidden sm:inline">Load 16 Sample SKUs</span>
             <span className="inline sm:hidden">16 Samples</span>
           </button>
 
           <button
             type="button"
+            onClick={handleResetAll}
+            className="flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50/70 hover:bg-rose-100 text-rose-700 px-2.5 py-1.5 text-xs font-bold shadow-2xs transition-all active:scale-95"
+            title="Clear all fields and reset form"
+          >
+            <RotateCcw className="h-3.5 w-3.5 text-rose-500" />
+            <span className="hidden sm:inline">Clear All</span>
+            <span className="inline sm:hidden">Clear</span>
+          </button>
+
+          <button
+            type="button"
             disabled={saving}
             onClick={() => handleSubmit('Draft')}
-            className="hidden sm:inline-flex rounded-xl border border-slate-200 bg-white/90 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 shadow-xs transition-colors disabled:opacity-50"
+            className="hidden sm:inline-flex rounded-xl border border-slate-200 bg-white/90 px-3 py-1.5 text-xs sm:text-sm font-semibold text-slate-700 hover:bg-slate-50 shadow-xs transition-colors disabled:opacity-50"
           >
             Save Draft
           </button>
@@ -749,13 +854,13 @@ export const CreateEditInvoice = () => {
             type="button"
             disabled={saving}
             onClick={() => handleSubmit('Sent')}
-            className="hidden sm:flex items-center gap-2 rounded-xl bg-gradient-to-r from-sky-500 via-teal-500 to-emerald-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-sky-500/25 hover:brightness-105 active:scale-[0.98] transition-all disabled:opacity-50"
+            className="hidden sm:flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-500 via-teal-500 to-emerald-500 px-3.5 py-1.5 text-xs sm:text-sm font-bold text-white shadow-md shadow-sky-500/25 hover:brightness-105 active:scale-[0.98] transition-all disabled:opacity-50"
           >
             {saving ? (
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
             ) : (
               <>
-                <Send className="h-4 w-4 stroke-[2.3]" />
+                <Send className="h-3.5 w-3.5 stroke-[2.3]" />
                 <span>Generate Invoice</span>
               </>
             )}
@@ -764,99 +869,94 @@ export const CreateEditInvoice = () => {
       </div>
 
       {/* PhonePe / Google Pay Style Mobile Mode Segmented Switcher */}
-      <div className="flex lg:hidden rounded-2xl bg-white border border-sky-200/80 p-1 shadow-xs">
+      <div className="flex lg:hidden rounded-xl bg-white border border-sky-200/80 p-0.5 shadow-xs">
         <button
           type="button"
           onClick={() => setMobileTab('form')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all ${
-            mobileTab === 'form'
-              ? 'bg-gradient-to-r from-sky-500 to-teal-500 text-white shadow-sm'
+          className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-bold transition-all ${mobileTab === 'form'
+              ? 'bg-gradient-to-r from-sky-500 to-teal-500 text-white shadow-xs'
               : 'text-slate-600 hover:text-slate-900'
-          }`}
+            }`}
         >
-          <FileCheck className="h-4 w-4" />
+          <FileCheck className="h-3.5 w-3.5" />
           <span>Invoice Builder</span>
         </button>
         <button
           type="button"
           onClick={() => setMobileTab('preview')}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-bold transition-all ${
-            mobileTab === 'preview'
-              ? 'bg-gradient-to-r from-sky-500 to-teal-500 text-white shadow-sm'
+          className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg text-xs font-bold transition-all ${mobileTab === 'preview'
+              ? 'bg-gradient-to-r from-sky-500 to-teal-500 text-white shadow-xs'
               : 'text-slate-600 hover:text-slate-900'
-          }`}
+            }`}
         >
-          <Eye className="h-4 w-4" />
+          <Eye className="h-3.5 w-3.5" />
           <span>Live Bill (Rs. {formatINR(grandTotal)})</span>
         </button>
       </div>
 
       {/* Main Container: Split or Full Views */}
-      <div className={`grid gap-6 items-start ${
-        viewMode === 'split'
+      <div className={`grid gap-6 items-start ${viewMode === 'split'
           ? 'grid-cols-1 lg:grid-cols-12'
           : 'grid-cols-1'
-      }`}>
+        }`}>
         {/* ================= LEFT / MAIN BUILDER FORM ================= */}
         {(viewMode === 'split' || viewMode === 'form') && (
           <div className={`space-y-5 ${mobileTab === 'form' ? 'block' : 'hidden lg:block'} ${viewMode === 'split' ? 'lg:col-span-6 xl:col-span-7' : 'w-full'}`}>
             {/* Customer & Billing Card */}
-            <div className="water-glass rounded-2xl p-5 space-y-4">
-              <div className="flex items-center justify-between border-b border-sky-100/90 pb-3 mb-1">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-2">
-                  <Building className="h-4 w-4 text-sky-500" />
+            <div className="water-glass rounded-2xl p-3 sm:p-5 space-y-3 sm:space-y-4">
+              <div className="flex items-center justify-between border-b border-sky-100/90 pb-2 mb-1">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                  <Building className="h-3.5 w-3.5 text-sky-500" />
                   Customer Information
                 </h2>
                 {selectedCustomer && (
-                  <span className="rounded-full px-2.5 py-0.5 text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  <span className="rounded-full px-2 py-0.5 text-[10px] sm:text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                     Live GST (5%)
                   </span>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div className="sm:col-span-2">
-                  <label className="block text-xs font-bold text-slate-600 mb-1.5">
+                  <label className="block text-xs font-bold text-slate-600 mb-1">
                     Select Retail Customer Store *
                   </label>
-                  <select
+                  <SearchableSelect
+                    options={customerOptions}
                     value={selectedCustomerId}
                     onChange={handleCustomerChange}
-                    className="w-full rounded-xl border border-sky-200/90 bg-white/95 px-3.5 py-2.5 text-sm font-semibold text-slate-800 shadow-xs focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-200"
-                  >
-                    <option value="">-- Choose Customer --</option>
-                    {customers.map((c) => (
-                      <option key={c._id} value={c._id}>
-                        {c.businessName} ({c.name}) - {c.billingAddress}
-                      </option>
-                    ))}
-                  </select>
+                    placeholder="-- Choose Customer Store --"
+                    searchPlaceholder="Search store name, contact, area, mobile..."
+                    title="Select Customer Store"
+                  />
                 </div>
 
                 {selectedCustomer && (
                   <>
-                    <div className="rounded-xl bg-sky-50/50 p-3.5 border border-sky-100/80 shadow-inner">
-                      <p className="text-[11px] font-bold text-slate-500 mb-1 uppercase tracking-wider">
+                    <div className="rounded-xl bg-sky-50/50 p-2.5 sm:p-3.5 border border-sky-100/80 shadow-inner">
+                      <p className="text-[10px] sm:text-[11px] font-bold text-slate-500 mb-0.5 uppercase tracking-wider">
                         Bill To Details:
                       </p>
-                      <p className="text-sm font-bold text-slate-900">
+                      <p className="text-xs sm:text-sm font-bold text-slate-900 truncate">
                         {selectedCustomer.businessName}
                       </p>
-                      <p className="text-xs text-slate-600 whitespace-pre-line mt-0.5">
+                      <p className="text-[11px] sm:text-xs text-slate-600 line-clamp-2 mt-0.5">
                         {selectedCustomer.billingAddress}
                       </p>
-                      <p className="text-xs font-mono font-bold text-sky-700 mt-2">
-                        GSTIN: {selectedCustomer.gstin || 'UNREGISTERED'}
-                      </p>
-                      <p className="text-xs font-medium text-slate-600">
-                        Mobile: {selectedCustomer.mobile}
-                      </p>
+                      <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                        <span className="text-[11px] font-mono font-bold text-sky-700">
+                          GSTIN: {selectedCustomer.gstin || 'UNREGISTERED'}
+                        </span>
+                        <span className="text-[11px] font-medium text-slate-600">
+                          Mob: {selectedCustomer.mobile}
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="rounded-xl bg-sky-50/50 p-3.5 border border-sky-100/80 shadow-inner flex flex-col justify-between">
+                    <div className="rounded-xl bg-sky-50/50 p-2.5 sm:p-3.5 border border-sky-100/80 shadow-inner flex flex-col justify-between">
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                          <p className="text-[10px] sm:text-[11px] font-bold text-slate-500 uppercase tracking-wider">
                             Ship To Address:
                           </p>
                           <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 cursor-pointer">
@@ -876,17 +976,29 @@ export const CreateEditInvoice = () => {
                         </div>
 
                         {sameAsBilling ? (
-                          <p className="text-xs text-slate-600 whitespace-pre-line mt-1">
+                          <p className="text-[11px] sm:text-xs text-slate-600 line-clamp-2 mt-0.5">
                             {selectedCustomer.billingAddress}
                           </p>
                         ) : (
-                          <textarea
-                            rows={2}
-                            value={shippingAddress}
-                            onChange={(e) => setShippingAddress(e.target.value)}
-                            placeholder="Enter shipping address..."
-                            className="w-full rounded-lg border border-sky-200 bg-white p-2 text-xs text-slate-800 focus:outline-none"
-                          />
+                          <div className="relative">
+                            <textarea
+                              rows={2}
+                              value={shippingAddress}
+                              onChange={(e) => setShippingAddress(e.target.value)}
+                              placeholder="Enter shipping address..."
+                              className="w-full rounded-lg border border-sky-200 bg-white p-1.5 pr-6 text-xs text-slate-800 focus:outline-none"
+                            />
+                            {shippingAddress && (
+                              <button
+                                type="button"
+                                onClick={() => setShippingAddress('')}
+                                className="absolute right-1.5 top-1.5 p-0.5 text-slate-400 hover:text-rose-500 rounded"
+                                title="Clear address"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -896,13 +1008,13 @@ export const CreateEditInvoice = () => {
             </div>
 
             {/* Invoice Date & Time */}
-            <div className="water-glass rounded-2xl p-4 sm:p-5">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="water-glass rounded-2xl p-3 sm:p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                 <div>
-                  <span className="text-[11px] font-bold text-slate-500 block mb-1">
+                  <span className="text-[10px] sm:text-[11px] font-bold text-slate-500 block mb-1">
                     Invoice Sequential Number
                   </span>
-                  <div className="font-mono text-xs font-black text-sky-700 bg-sky-50/70 p-2 rounded-xl border border-sky-100">
+                  <div className="font-mono text-xs font-black text-sky-700 bg-sky-50/70 py-1.5 px-2.5 rounded-xl border border-sky-100">
                     {company?.invoicePrefix || 'SCKT/2026-27/'} [Auto]
                   </div>
                 </div>
@@ -915,9 +1027,8 @@ export const CreateEditInvoice = () => {
                     type="date"
                     value={convertDateToInputFormat(invoiceDate)}
                     onChange={(e) => handleInvoiceDateChange(convertDateFromInputFormat(e.target.value))}
-                    className={`w-full rounded-xl border bg-white px-3 py-1.5 text-xs text-slate-800 font-mono font-semibold focus:outline-none ${
-                      dateError ? 'border-red-400 focus:border-red-500' : 'border-sky-200 focus:border-sky-500'
-                    }`}
+                    className={`w-full rounded-xl border bg-white px-3 py-1.5 text-xs text-slate-800 font-mono font-semibold focus:outline-none ${dateError ? 'border-red-400 focus:border-red-500' : 'border-sky-200 focus:border-sky-500'
+                      }`}
                   />
                   {dateError && (
                     <p className="text-[10px] text-red-500 font-semibold mt-0.5">⚠ {dateError}</p>
@@ -926,13 +1037,11 @@ export const CreateEditInvoice = () => {
 
                 <div>
                   <label className="block text-xs font-bold text-slate-600 mb-1">
-                    Invoice Time
+                    Invoice Time (AM/PM)
                   </label>
-                  <input
-                    type="time"
-                    value={convertTimeToInputFormat(invoiceTime)}
-                    onChange={(e) => setInvoiceTime(convertTo12HourFormat(e.target.value))}
-                    className="w-full rounded-xl border border-sky-200 bg-white px-3 py-1.5 text-xs text-slate-800 font-mono font-semibold focus:border-sky-500 focus:outline-none"
+                  <TimePicker
+                    value={invoiceTime}
+                    onChange={(t) => setInvoiceTime(t)}
                   />
                 </div>
               </div>
@@ -940,51 +1049,56 @@ export const CreateEditInvoice = () => {
 
             {/* Dynamic Line-Items Table */}
             <div className="water-glass rounded-2xl overflow-hidden shadow-md">
-              <div className="flex items-center justify-between border-b border-sky-100 p-4 bg-gradient-to-r from-sky-50/60 to-white">
+              <div className="flex items-center justify-between border-b border-sky-100 p-3 sm:p-4 bg-gradient-to-r from-sky-50/60 to-white">
                 <div>
-                  <h2 className="text-sm font-extrabold uppercase tracking-wider text-slate-850">
-                    Line Items & Wholesale SKUs
+                  <h2 className="text-xs sm:text-sm font-extrabold uppercase tracking-wider text-slate-850">
+                    Line Items ({items.length})
                   </h2>
-                  <p className="text-xs text-slate-500">
-                    Select chocolate/confectionery SKU and toggle sell unit (Carton, Box, or Piece).
+                  <p className="text-[10px] sm:text-xs text-slate-500">
+                    Tap SKU to select & toggle unit
                   </p>
                 </div>
 
                 <button
                   type="button"
                   onClick={addRow}
-                  className="flex items-center gap-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 px-3 py-1.5 text-xs font-bold text-sky-700 shadow-xs transition-colors"
+                  className="flex items-center gap-1 rounded-xl bg-sky-50 hover:bg-sky-100 border border-sky-200 px-2.5 py-1 text-xs font-bold text-sky-700 shadow-2xs transition-colors shrink-0"
                 >
-                  <Plus className="h-4 w-4 text-sky-600" />
+                  <Plus className="h-3.5 w-3.5 text-sky-600" />
                   <span>Add Row</span>
                 </button>
               </div>
 
               {/* MOBILE VIEW: Touch-first Item Cards (PhonePe / Google Pay Style) */}
-              <div className="block md:hidden p-3 space-y-3 max-h-[500px] overflow-y-auto">
+              <div className="block md:hidden p-2 sm:p-3 space-y-2.5 max-h-[520px] overflow-y-auto">
                 {items.map((row, index) => {
-                  const selProd = products.find(p => p._id === row.productId);
+                  const selProd = products.find(p => String(p._id) === String(row.productId));
+                  const unitInfo = getPackUnitInfo(row.packType || selProd?.packType, row.productName || selProd?.name);
+                  const midUnit = unitInfo.singular;
+                  const midUnitPlural = unitInfo.plural;
+                  const isMiddleActive = row.sellUnit === 'Box' || row.sellUnit === midUnit || row.sellUnit === 'Sheet' || !row.sellUnit;
+
                   return (
                     <div
                       key={index}
-                      className="rounded-2xl border border-sky-100 bg-white/90 p-3.5 shadow-xs space-y-3"
+                      className="rounded-xl border border-sky-100 bg-white/95 p-3 shadow-xs space-y-2.5"
                     >
-                      <div className="flex items-center justify-between border-b border-sky-50 pb-2">
+                      <div className="flex items-center justify-between border-b border-sky-50 pb-1.5">
                         <div className="flex items-center gap-2">
-                          <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-sky-100 font-mono text-xs font-black text-sky-700">
+                          <span className="flex h-5 w-5 items-center justify-center rounded-lg bg-sky-100 font-mono text-[10px] font-black text-sky-700">
                             #{index + 1}
                           </span>
-                          <span className="text-xs font-bold text-slate-700">
+                          <span className="text-xs font-bold text-slate-800 truncate max-w-[200px]">
                             {row.productName || 'Line Item'}
                           </span>
                         </div>
                         <button
                           type="button"
                           onClick={() => removeRow(index)}
-                          className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-colors"
+                          className="rounded-lg p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-500 transition-colors"
                           title="Remove item"
                         >
-                          <Trash2 className="h-4 w-4" />
+                          <Trash2 className="h-3.5 w-3.5" />
                         </button>
                       </div>
 
@@ -993,71 +1107,72 @@ export const CreateEditInvoice = () => {
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                           Select SKU
                         </label>
-                        <select
+                        <SearchableSelect
+                          options={productOptions}
                           value={row.productId}
-                          onChange={(e) => updateRowProduct(index, e.target.value)}
-                          className="w-full rounded-xl border border-sky-200/90 bg-white px-3 py-2 text-xs font-bold text-slate-800 shadow-xs focus:border-sky-500 focus:outline-none"
-                        >
-                          <option value="">-- Choose SKU --</option>
-                          {products.map((p) => (
-                            <option key={p._id} value={p._id}>
-                              {p.name} ({p.packType}) - Rs. {Number(p.piecePrice ?? 4).toFixed(2)}/pc
-                            </option>
-                          ))}
-                        </select>
+                          onChange={(val) => updateRowProduct(index, val)}
+                          placeholder="-- Choose SKU --"
+                          searchPlaceholder="Search SKU, flavour, pack..."
+                          title="Select Product SKU"
+                        />
                         {selProd && (
-                          <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
-                            <span>Avail Stock: <b className="text-sky-700 font-bold">{getAvailableStockText(selProd, row.sellUnit)}</b> (Total: {selProd.stockPieces ?? 0} pcs)</span>
+                          <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                            <span>Avail: <b className="text-sky-700 font-bold">{getAvailableStockText(selProd, row.sellUnit)}</b></span>
+                            <span className="text-slate-400">Total: {selProd.stockPieces ?? 0} pcs</span>
                           </div>
                         )}
                       </div>
 
-                      {/* Sell Unit: 3 Toggle Buttons (Cotton / Box / Piece) */}
+                      {/* Sell Unit: 3 Toggle Buttons (Carton / midUnit / Piece) */}
                       <div>
                         <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
                           Selling Unit
                         </label>
-                        <div className="grid grid-cols-3 gap-1.5 bg-slate-100 p-1 rounded-xl">
-                          {['Carton', 'Box', 'Piece'].map((u) => {
-                            const isSelected = row.sellUnit === u;
+                        <div className="grid grid-cols-3 gap-1 bg-slate-100 p-0.5 rounded-lg">
+                          {['Carton', midUnit, 'Piece'].map((u) => {
+                            const isSelected = u === 'Carton'
+                              ? (row.sellUnit === 'Carton' || row.sellUnit === 'Cotton')
+                              : u === 'Piece'
+                                ? row.sellUnit === 'Piece'
+                                : isMiddleActive;
+
                             return (
                               <button
                                 key={u}
                                 type="button"
-                                onClick={() => updateRowUnit(index, u)}
-                                className={`py-1.5 text-xs font-bold rounded-lg transition-all text-center ${
-                                  isSelected
-                                    ? u === 'Carton' || u === 'Cotton'
-                                      ? 'bg-purple-600 text-white shadow-sm'
-                                      : u === 'Box'
-                                      ? 'bg-sky-600 text-white shadow-sm'
-                                      : 'bg-teal-600 text-white shadow-sm'
+                                onClick={() => updateRowUnit(index, u === midUnit ? (midUnit === 'Sheet' ? 'Sheet' : 'Box') : u)}
+                                className={`py-1 text-xs font-bold rounded-md transition-all text-center ${isSelected
+                                    ? u === 'Carton'
+                                      ? 'bg-purple-600 text-white shadow-xs'
+                                      : u === midUnit
+                                        ? 'bg-sky-600 text-white shadow-xs'
+                                        : 'bg-teal-600 text-white shadow-xs'
                                     : 'text-slate-600 hover:text-slate-900'
-                                }`}
+                                  }`}
                               >
                                 {u}
                               </button>
                             );
                           })}
                         </div>
-                        <div className="mt-1 text-[10.5px] font-bold text-slate-500 text-right">
-                          {(row.sellUnit === 'Carton' || row.sellUnit === 'Cotton') && `(= ${row.qty * (row.boxesPerCarton || row.boxesPerCotton || 1)} Boxes / ${row.totalPiecesSold} Pcs)`}
-                          {row.sellUnit === 'Box' && `(= ${row.totalPiecesSold} Pcs)`}
+                        <div className="mt-1 text-[10px] font-bold text-slate-500 text-right">
+                          {(row.sellUnit === 'Carton' || row.sellUnit === 'Cotton') && `(= ${row.qty * (row.boxesPerCarton || row.boxesPerCotton || 1)} ${midUnitPlural} / ${row.totalPiecesSold} Pcs)`}
+                          {isMiddleActive && `(= ${row.totalPiecesSold} Pcs)`}
                           {row.sellUnit === 'Piece' && `(= ${row.qty} Pcs)`}
                         </div>
                       </div>
 
                       {/* Quantity Stepper + Rates */}
-                      <div className="grid grid-cols-2 gap-2 bg-sky-50/50 rounded-xl p-2.5 border border-sky-100">
+                      <div className="grid grid-cols-2 gap-2 bg-sky-50/50 rounded-xl p-2 border border-sky-100">
                         <div>
                           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                            Qty ({row.sellUnit})
+                            Qty ({row.sellUnit === 'Carton' ? 'Carton' : row.sellUnit === 'Piece' ? 'Piece' : midUnit})
                           </span>
                           <div className="flex items-center gap-1.5 mt-1">
                             <button
                               type="button"
                               onClick={() => decrementQty(index)}
-                              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white border border-sky-200 text-slate-700 font-black text-sm active:scale-90 shadow-2xs hover:bg-sky-50"
+                              className="flex h-7 w-7 items-center justify-center rounded-lg bg-white border border-sky-200 text-slate-700 font-black text-xs active:scale-90 shadow-2xs hover:bg-sky-50"
                             >
                               -
                             </button>
@@ -1068,12 +1183,12 @@ export const CreateEditInvoice = () => {
                               min="0"
                               value={row.qty}
                               onChange={(e) => updateRowQty(index, e.target.value)}
-                              className="w-14 text-center rounded-lg border border-sky-200 bg-white py-1 text-xs font-mono font-bold text-slate-900 shadow-xs focus:border-sky-500 focus:outline-none"
+                              className="w-12 text-center rounded-lg border border-sky-200 bg-white py-0.5 text-xs font-mono font-bold text-slate-900 shadow-2xs focus:border-sky-500 focus:outline-none"
                             />
                             <button
                               type="button"
                               onClick={() => incrementQty(index)}
-                              className="flex h-8 w-8 items-center justify-center rounded-lg bg-white border border-sky-200 text-slate-700 font-black text-sm active:scale-90 shadow-2xs hover:bg-sky-50"
+                              className="flex h-7 w-7 items-center justify-center rounded-lg bg-white border border-sky-200 text-slate-700 font-black text-xs active:scale-90 shadow-2xs hover:bg-sky-50"
                             >
                               +
                             </button>
@@ -1090,10 +1205,10 @@ export const CreateEditInvoice = () => {
                             min="0"
                             value={row.piecePrice}
                             onChange={(e) => updateRowPiecePrice(index, e.target.value)}
-                            className="mt-1 w-full text-right rounded-lg border border-sky-200 bg-white px-2 py-1 text-xs font-mono font-bold text-slate-900 shadow-xs focus:border-sky-500 focus:outline-none"
+                            className="mt-1 w-full text-right rounded-lg border border-sky-200 bg-white px-2 py-0.5 text-xs font-mono font-bold text-slate-900 shadow-2xs focus:border-sky-500 focus:outline-none"
                           />
                           <p className="text-[10px] font-bold text-teal-600 mt-0.5 text-right">
-                            {row.sellUnit} Rate: Rs. {formatINR(row.unitPrice)}
+                            {row.sellUnit === 'Carton' ? 'Carton' : row.sellUnit === 'Piece' ? 'Piece' : midUnit} Rate: Rs. {formatINR(row.unitPrice)}
                           </p>
                         </div>
                       </div>
@@ -1107,10 +1222,10 @@ export const CreateEditInvoice = () => {
                           </span>
                         </div>
                         <div className="text-right">
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">
+                          <span className="text-[9.5px] text-slate-400 font-bold uppercase tracking-wider block">
                             Row Total
                           </span>
-                          <span className="font-mono text-sm font-black text-sky-700">
+                          <span className="font-mono text-xs sm:text-sm font-black text-sky-700">
                             Rs. {formatINR(row.lineAmount)}
                           </span>
                         </div>
@@ -1122,17 +1237,22 @@ export const CreateEditInvoice = () => {
                 <button
                   type="button"
                   onClick={addRow}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-sky-200 bg-sky-50/50 py-3 text-xs font-bold text-sky-700 hover:bg-sky-100/60 active:scale-98 transition-all"
+                  className="w-full flex items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-sky-200 bg-sky-50/50 py-2 text-xs font-bold text-sky-700 hover:bg-sky-100/60 active:scale-98 transition-all"
                 >
-                  <Plus className="h-4 w-4" />
-                  <span>+ Add Another Product Item</span>
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>+ Add Product Item</span>
                 </button>
               </div>
 
               {/* DESKTOP VIEW: Clean 2-Row Line Item Cards with Equal Alignment */}
               <div className="hidden md:block space-y-3 max-h-[520px] overflow-y-auto p-1">
                 {items.map((row, index) => {
-                  const selProd = products.find((p) => p._id === row.productId);
+                  const selProd = products.find((p) => String(p._id) === String(row.productId));
+                  const unitInfo = getPackUnitInfo(row.packType || selProd?.packType, row.productName || selProd?.name);
+                  const midUnit = unitInfo.singular;
+                  const midUnitPlural = unitInfo.plural;
+                  const isMiddleActive = row.sellUnit === 'Box' || row.sellUnit === midUnit || row.sellUnit === 'Sheet' || !row.sellUnit;
+
                   return (
                     <div
                       key={index}
@@ -1146,42 +1266,42 @@ export const CreateEditInvoice = () => {
 
                         {/* SKU Selector (flex-1) */}
                         <div className="flex-1 min-w-[220px]">
-                          <select
+                          <SearchableSelect
+                            options={productOptions}
                             value={row.productId}
-                            onChange={(e) => updateRowProduct(index, e.target.value)}
-                            className="w-full rounded-xl border border-sky-200/90 bg-white px-3 py-1.5 text-xs font-bold text-slate-800 shadow-2xs focus:border-sky-500 focus:outline-none"
-                          >
-                            <option value="">-- Choose Wholesale SKU --</option>
-                            {products.map((p) => (
-                              <option key={p._id} value={p._id}>
-                                {p.name} ({p.packType}) - Rs. {Number(p.piecePrice ?? 4).toFixed(2)}/pc
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(val) => updateRowProduct(index, val)}
+                            placeholder="-- Choose Wholesale SKU --"
+                            searchPlaceholder="Search SKU, flavour, pack..."
+                            title="Select Wholesale SKU"
+                          />
                         </div>
 
-                        {/* Sell Unit: Carton / Box / Piece Toggle */}
+                        {/* Sell Unit: Carton / midUnit / Piece Toggle */}
                         <div className="flex items-center gap-2 shrink-0">
                           <span className="text-[10.5px] font-bold uppercase tracking-wider text-slate-500">
                             Unit:
                           </span>
                           <div className="inline-flex rounded-xl bg-slate-100 p-0.5 border border-slate-200">
-                            {['Carton', 'Box', 'Piece'].map((u) => {
-                              const isSelected = row.sellUnit === u;
+                            {['Carton', midUnit, 'Piece'].map((u) => {
+                              const isSelected = u === 'Carton'
+                                ? (row.sellUnit === 'Carton' || row.sellUnit === 'Cotton')
+                                : u === 'Piece'
+                                  ? row.sellUnit === 'Piece'
+                                  : isMiddleActive;
+
                               return (
                                 <button
                                   key={u}
                                   type="button"
-                                  onClick={() => updateRowUnit(index, u)}
-                                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${
-                                    isSelected
-                                      ? u === 'Carton' || u === 'Cotton'
+                                  onClick={() => updateRowUnit(index, u === midUnit ? (midUnit === 'Sheet' ? 'Sheet' : 'Box') : u)}
+                                  className={`px-3 py-1 text-xs font-bold rounded-lg transition-all ${isSelected
+                                      ? u === 'Carton'
                                         ? 'bg-purple-600 text-white shadow-xs'
-                                        : u === 'Box'
-                                        ? 'bg-sky-600 text-white shadow-xs'
-                                        : 'bg-teal-600 text-white shadow-xs'
+                                        : u === midUnit
+                                          ? 'bg-sky-600 text-white shadow-xs'
+                                          : 'bg-teal-600 text-white shadow-xs'
                                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                                  }`}
+                                    }`}
                                 >
                                   {u}
                                 </button>
@@ -1213,7 +1333,7 @@ export const CreateEditInvoice = () => {
                         {/* 1. Qty Stepper */}
                         <div>
                           <label className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">
-                            Qty ({row.sellUnit || 'Box'})
+                            Qty ({row.sellUnit === 'Carton' ? 'Carton' : row.sellUnit === 'Piece' ? 'Piece' : midUnit})
                           </label>
                           <div className="inline-flex items-center gap-1">
                             <button
@@ -1260,7 +1380,7 @@ export const CreateEditInvoice = () => {
                         {/* 3. Unit Rate */}
                         <div className="text-right">
                           <label className="block text-[9.5px] font-bold uppercase tracking-wider text-slate-500 mb-0.5">
-                            Rate / {row.sellUnit}
+                            Rate / {row.sellUnit === 'Carton' ? 'Carton' : row.sellUnit === 'Piece' ? 'Piece' : midUnit}
                           </label>
                           <span className="font-mono text-xs font-bold text-teal-700">
                             Rs. {formatINR(row.unitPrice)}
@@ -1310,15 +1430,27 @@ export const CreateEditInvoice = () => {
                     <label className="block text-[11px] font-bold text-slate-600 mb-1">
                       Order / Delivery Notes
                     </label>
-                    <input
-                      type="text"
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      placeholder="Vehicle number, dispatch instructions..."
-                      className="w-full rounded-xl border border-sky-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-sky-500 focus:outline-none"
-                    />
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={notes}
+                        onChange={(e) => setNotes(e.target.value)}
+                        placeholder="Vehicle number, dispatch instructions..."
+                        className="w-full rounded-xl border border-sky-200 bg-white pl-3 pr-7 py-1.5 text-xs text-slate-800 focus:border-sky-500 focus:outline-none"
+                      />
+                      {notes && (
+                        <button
+                          type="button"
+                          onClick={() => setNotes('')}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-rose-500 rounded"
+                          title="Clear notes"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
                     <p className="text-[11px] font-semibold text-slate-500 mt-1.5">
-                      Total Order: <span className="text-sky-600 font-extrabold">{totalPieces} Pieces</span> ({totalCartons > 0 ? `${totalCartons} Cartons ` : ''}{totalBoxes > 0 ? `${totalBoxes} Boxes ` : ''}{totalDirectPieces > 0 ? `${totalDirectPieces} Pcs` : ''}) across {items.length} SKUs.
+                      Total Order: <span className="text-sky-600 font-extrabold">{totalPieces} Pieces</span> ({totalUnitsOverview}) across {items.length} SKUs.
                     </p>
                   </div>
 
@@ -1393,11 +1525,10 @@ export const CreateEditInvoice = () => {
                                 }
                               }
                             }}
-                            className={`px-1.5 py-0.5 text-[9px] font-extrabold rounded-md transition-all ${
-                              discountType === 'percentage'
+                            className={`px-1.5 py-0.5 text-[9px] font-extrabold rounded-md transition-all ${discountType === 'percentage'
                                 ? 'bg-sky-600 text-white shadow-xs'
                                 : 'text-slate-600 hover:text-slate-900'
-                            }`}
+                              }`}
                             title="Percentage Discount (%)"
                           >
                             %
@@ -1412,11 +1543,10 @@ export const CreateEditInvoice = () => {
                                 }
                               }
                             }}
-                            className={`px-1.5 py-0.5 text-[9px] font-extrabold rounded-md transition-all ${
-                              discountType === 'flat'
+                            className={`px-1.5 py-0.5 text-[9px] font-extrabold rounded-md transition-all ${discountType === 'flat'
                                 ? 'bg-sky-600 text-white shadow-xs'
                                 : 'text-slate-600 hover:text-slate-900'
-                            }`}
+                              }`}
                             title="Flat Rupee Amount Discount (₹)"
                           >
                             ₹ Flat
@@ -1636,22 +1766,22 @@ export const CreateEditInvoice = () => {
       </div>
 
       {/* PhonePe / Google Pay Style Sticky Checkout Bar for Mobile */}
-      <div className="fixed bottom-16 left-0 right-0 z-30 block lg:hidden bg-white/95 backdrop-blur-xl border-t border-sky-100/90 p-3 shadow-[0_-8px_25px_rgba(14,165,233,0.12)]">
-        <div className="flex items-center justify-between gap-3 max-w-lg mx-auto">
+      <div className="fixed bottom-16 left-0 right-0 z-30 block lg:hidden bg-white/95 backdrop-blur-xl border-t border-sky-100/90 px-3 py-2 shadow-[0_-8px_25px_rgba(14,165,233,0.12)]">
+        <div className="flex items-center justify-between gap-2 max-w-lg mx-auto">
           <div>
-            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
-              Total ({totalBoxes} Boxes)
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider truncate max-w-[150px]">
+              Total ({totalUnitsOverview})
             </p>
-            <p className="text-base font-black font-mono text-slate-900">
+            <p className="text-sm sm:text-base font-black font-mono text-slate-900">
               Rs. {formatINR(grandTotal)}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               disabled={saving}
               onClick={() => handleSubmit('Draft')}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 active:scale-95 shadow-2xs"
+              className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 active:scale-95 shadow-2xs"
             >
               Draft
             </button>
@@ -1659,13 +1789,13 @@ export const CreateEditInvoice = () => {
               type="button"
               disabled={saving}
               onClick={() => handleSubmit('Sent')}
-              className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-sky-500 via-teal-500 to-emerald-500 px-4 py-2 text-xs font-black text-white shadow-md shadow-sky-500/25 active:scale-95 transition-all"
+              className="flex items-center gap-1 rounded-xl bg-gradient-to-r from-sky-500 via-teal-500 to-emerald-500 px-3 py-1.5 text-xs font-black text-white shadow-md shadow-sky-500/25 active:scale-95 transition-all"
             >
               {saving ? (
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
               ) : (
                 <>
-                  <Send className="h-3.5 w-3.5 stroke-[2.3]" />
+                  <Send className="h-3 w-3 stroke-[2.3]" />
                   <span>Generate Bill ➔</span>
                 </>
               )}

@@ -17,6 +17,7 @@ import {
 import toast from 'react-hot-toast';
 import { invoicesAPI } from '../../api/apiClient';
 import PrintableInvoice from '../../components/invoice/PrintableInvoice';
+import { getPackUnitInfo } from '../../utils/packUnitUtils';
 
 const INVOICE_NATURAL_WIDTH = 760;
 const InvoiceScaler = ({ children }) => {
@@ -155,6 +156,33 @@ export const InvoiceDetail = () => {
     );
   }
 
+  const detailCartons = (invoice?.items || [])
+    .filter((r) => r.sellUnit === 'Carton' || r.sellUnit === 'Cotton' || r.unit === 'Carton' || r.unit === 'Cotton')
+    .reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
+  
+  const detailOtherCounts = {};
+  (invoice?.items || []).forEach((r) => {
+    const u = r.sellUnit || r.unit || 'Box';
+    if (u === 'Carton' || u === 'Cotton' || u === 'Piece') return;
+    const unitInfo = getPackUnitInfo(r.packType, r.itemName);
+    const unitName = unitInfo.plural;
+    detailOtherCounts[unitName] = (detailOtherCounts[unitName] || 0) + (Number(r.qty) || 0);
+  });
+
+  const detailPieces = (invoice?.items || [])
+    .filter((r) => r.sellUnit === 'Piece' || r.unit === 'Piece')
+    .reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
+
+  const detailOtherTexts = Object.entries(detailOtherCounts)
+    .filter(([_, count]) => count > 0)
+    .map(([name, count]) => `${count} ${name}`);
+
+  const totalUnitsSummary = [
+    detailCartons > 0 ? `${detailCartons} Carton${detailCartons > 1 ? 's' : ''}` : null,
+    ...detailOtherTexts,
+    detailPieces > 0 ? `${detailPieces} Pcs` : null,
+  ].filter(Boolean).join(' | ') || `${invoice?.totalQty || 0} Units`;
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 lg:gap-6 pb-6 lg:pb-8 items-start">
       {/* Left Sidebar: Controls & Information */}
@@ -228,8 +256,8 @@ export const InvoiceDetail = () => {
           </div>
 
           <div className="flex flex-col items-end gap-1 text-[9px] sm:text-[11px] text-slate-600 font-medium">
-            <span className="bg-white px-1.5 sm:px-2 py-0.5 rounded-md border border-sky-100 shadow-2xs whitespace-nowrap">
-              {invoice.totalQty} Boxes
+            <span className="bg-white px-1.5 sm:px-2 py-0.5 rounded-md border border-sky-100 shadow-2xs whitespace-nowrap font-bold text-sky-900">
+              {totalUnitsSummary}
             </span>
             <span className="bg-white px-1.5 sm:px-2 py-0.5 rounded-md border border-sky-100 shadow-2xs font-mono whitespace-nowrap">
               {invoice.invoiceDate}

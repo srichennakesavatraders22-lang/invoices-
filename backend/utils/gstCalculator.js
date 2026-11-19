@@ -83,6 +83,7 @@ export async function recalculateInvoice(
     calculatedItems.push({
       product:         dbProduct._id,
       itemName:        dbProduct.name,
+      hsnCode:         dbProduct.hsnCode || item.hsnCode || '',
       packType:        dbProduct.packType,
       sellUnit,
       qty,

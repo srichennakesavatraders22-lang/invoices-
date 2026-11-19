@@ -75,7 +75,9 @@ export const CompanySettings = () => {
             bankName: '',
             branch: '',
           },
-          termsAndConditions: res.data.termsAndConditions || [],
+          termsAndConditions: (res.data.termsAndConditions || []).map((t) =>
+            typeof t === 'string' ? t.replace(/^\d+[\.\)]\s*/, '') : ''
+          ),
         });
       }
     } catch (err) {
@@ -98,7 +100,7 @@ export const CompanySettings = () => {
 
   const handleTermChange = (index, value) => {
     const updated = [...formData.termsAndConditions];
-    updated[index] = value;
+    updated[index] = typeof value === 'string' ? value.replace(/^\d+[\.\)]\s*/, '') : value;
     setFormData((prev) => ({ ...prev, termsAndConditions: updated }));
   };
 
@@ -107,7 +109,7 @@ export const CompanySettings = () => {
       ...prev,
       termsAndConditions: [
         ...prev.termsAndConditions,
-        `${prev.termsAndConditions.length + 1}. `,
+        '',
       ],
     }));
   };
@@ -153,7 +155,14 @@ export const CompanySettings = () => {
     e.preventDefault();
     setSaving(true);
     try {
-      await settingsAPI.updateCompany(formData);
+      const cleanTerms = (formData.termsAndConditions || [])
+        .map((t) => (typeof t === 'string' ? t.replace(/^\d+[\.\)]\s*/, '').trim() : ''))
+        .filter(Boolean);
+      await settingsAPI.updateCompany({
+        ...formData,
+        termsAndConditions: cleanTerms,
+      });
+      setFormData((prev) => ({ ...prev, termsAndConditions: cleanTerms }));
       toast.success('Company settings saved successfully!');
     } catch (err) {
       toast.error(err.message || 'Failed to save company settings');
@@ -732,10 +741,14 @@ export const CompanySettings = () => {
               <div className="space-y-2">
                 {formData.termsAndConditions?.map((term, index) => (
                   <div key={index} className="flex items-center gap-2">
+                    <span className="flex-shrink-0 w-7 h-8 flex items-center justify-center font-bold text-xs text-sky-700 bg-sky-100/70 border border-sky-200 rounded-xl select-none">
+                      {index + 1}.
+                    </span>
                     <input
                       type="text"
-                      value={term}
+                      value={typeof term === 'string' ? term.replace(/^\d+[\.\)]\s*/, '') : ''}
                       onChange={(e) => handleTermChange(index, e.target.value)}
+                      placeholder={`Condition ${index + 1}...`}
                       className="flex-1 rounded-xl border border-sky-200 bg-white px-3 py-1.5 text-xs text-slate-800 shadow-xs focus:border-sky-500 focus:outline-none"
                     />
                     <button

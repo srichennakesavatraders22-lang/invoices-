@@ -155,13 +155,14 @@ export async function generateInvoicePDF(invoice, res) {
   doc.moveTo(left, currentY).lineTo(right, currentY).lineWidth(0.8).stroke('#222222');
 
   const cols = [
-    { id: 'sno', title: 'S.No', width: 28, align: 'center' },
-    { id: 'name', title: 'Item Name (SKU)', width: 195, align: 'left' },
-    { id: 'qty', title: 'Qty/Unit', width: 62, align: 'center' },
-    { id: 'mrp', title: 'Rate\n(Rs.)', width: 55, align: 'right' },
-    { id: 'taxable', title: 'Taxable\n(Rs.)', width: 65, align: 'right' },
-    { id: 'gst', title: 'GST\n(%)', width: 50, align: 'center' },
-    { id: 'amount', title: 'Amount\n(Rs.)', width: 90, align: 'right' },
+    { id: 'sno', title: 'S.No', width: 24, align: 'center' },
+    { id: 'name', title: 'Item Name (SKU)', width: 145, align: 'left' },
+    { id: 'hsn', title: 'HSN', width: 48, align: 'center' },
+    { id: 'qty', title: 'Qty/Unit', width: 56, align: 'center' },
+    { id: 'mrp', title: 'Rate\n(Rs.)', width: 50, align: 'right' },
+    { id: 'taxable', title: 'Taxable\n(Rs.)', width: 62, align: 'right' },
+    { id: 'gst', title: 'GST\n(%)', width: 45, align: 'center' },
+    { id: 'amount', title: 'Amount\n(Rs.)', width: 85, align: 'right' },
   ];
 
   const totalColsWidth = cols.reduce((sum, col) => sum + col.width, 0);
@@ -213,11 +214,20 @@ export async function generateInvoicePDF(invoice, res) {
     cols.forEach(col => {
       let val = '';
       const unitLabel = item.sellUnit || item.unit || 'Box';
-      const formattedUnit = (unitLabel === 'Carton' || unitLabel === 'Cotton') ? 'Carton' : unitLabel === 'Piece' ? 'Pcs' : 'Boxes';
+      const itemPack = `${item.packType || ''} ${item.itemName || ''}`.toLowerCase();
+      const isSheet = itemPack.includes('pilo') || itemPack.includes('pillo') || itemPack.includes('pillow') || itemPack.includes('sheet');
+      const formattedUnit = (unitLabel === 'Carton' || unitLabel === 'Cotton') 
+        ? 'Carton' 
+        : unitLabel === 'Piece' 
+        ? 'Pcs' 
+        : isSheet 
+        ? 'Sheets' 
+        : 'Boxes';
       const taxable = item.taxableAmount !== undefined ? item.taxableAmount : (item.amount - (item.gstAmount || 0));
 
       if (col.id === 'sno') val = `${index + 1}`;
       else if (col.id === 'name') val = item.itemName ? `${item.itemName}${item.packType ? ` (${item.packType})` : ''}` : '';
+      else if (col.id === 'hsn') val = item.hsnCode || item.hsn || '-';
       else if (col.id === 'qty') val = `${item.qty} ${formattedUnit}`;
       else if (col.id === 'mrp') val = Number(item.unitPrice || item.mrp || 0).toFixed(2);
       else if (col.id === 'taxable') val = Number(taxable || 0).toFixed(2);
@@ -248,14 +258,44 @@ export async function generateInvoicePDF(invoice, res) {
   doc.moveTo(left, currentY).lineTo(right, currentY).lineWidth(0.8).stroke('#222222');
 
   // 5. Sub Total (Original Price) Row
+  const totalCartons = items
+    .filter((r) => r.sellUnit === 'Carton' || r.sellUnit === 'Cotton' || r.unit === 'Carton' || r.unit === 'Cotton')
+    .reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
+  
+  let totalBoxesCount = 0;
+  let totalSheetsCount = 0;
+  items.forEach((r) => {
+    const u = r.sellUnit || r.unit || 'Box';
+    if (u === 'Carton' || u === 'Cotton' || u === 'Piece') return;
+    const itemPack = `${r.packType || ''} ${r.itemName || ''}`.toLowerCase();
+    const isSheet = itemPack.includes('pilo') || itemPack.includes('pillo') || itemPack.includes('pillow') || itemPack.includes('sheet');
+    if (isSheet) {
+      totalSheetsCount += (Number(r.qty) || 0);
+    } else {
+      totalBoxesCount += (Number(r.qty) || 0);
+    }
+  });
+
+  const totalPieces = items
+    .filter((r) => r.sellUnit === 'Piece' || r.unit === 'Piece')
+    .reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
+  const totalQtyText = [
+    totalCartons > 0 ? `${totalCartons} Carton${totalCartons > 1 ? 's' : ''}` : null,
+    totalBoxesCount > 0 ? `${totalBoxesCount} Box${totalBoxesCount > 1 ? 'es' : ''}` : null,
+    totalSheetsCount > 0 ? `${totalSheetsCount} Sheet${totalSheetsCount > 1 ? 's' : ''}` : null,
+    totalPieces > 0 ? `${totalPieces} Pcs` : null,
+  ].filter(Boolean).join(' | ') || `${invoice.totalQty || 0} Units`;
+
   const lastColWidth = cols[cols.length - 1].width;
   const labelWidth = contentWidth - lastColWidth;
   const dividerX = left + labelWidth;
+  const firstColsWidth = cols[0].width + cols[1].width + cols[2].width;
 
   const subTotalHeight = 18;
   doc.rect(left, currentY, contentWidth, subTotalHeight).fill('#f9fafb');
-  doc.font('Helvetica-Bold').fontSize(8).fillColor('#111827');
-  doc.text('Sub Total (Original Price):', left + 8, currentY + 5, { width: labelWidth - 16, align: 'right' });
+  doc.font('Helvetica-Bold').fontSize(7.5).fillColor('#111827');
+  doc.text(`Total Qty: ${totalQtyText}`, left + 4, currentY + 5, { width: firstColsWidth - 8, align: 'center' });
+  doc.fontSize(8).text('Sub Total (Original Price):', left + 8, currentY + 5, { width: labelWidth - 16, align: 'right' });
   doc.moveTo(dividerX, currentY).lineTo(dividerX, currentY + subTotalHeight).lineWidth(0.5).stroke('#222222');
   doc.text(
     `Rs. ${Number(invoice.subTotal || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`,
@@ -334,7 +374,8 @@ export async function generateInvoicePDF(invoice, res) {
   doc.font('Helvetica').fontSize(6.5).fillColor('#374151');
   let termY = currentY + 14;
   terms.forEach((t, i) => {
-    const formattedTerm = t.match(/^\d+\./) ? t : `${i + 1}. ${t}`;
+    const cleanTerm = typeof t === 'string' ? t.replace(/^\d+[\.\)]\s*/, '').trim() : '';
+    const formattedTerm = `${i + 1}. ${cleanTerm}`;
     doc.text(formattedTerm, left + 8, termY, { width: termsColWidth - 16 });
     termY += 8;
   });

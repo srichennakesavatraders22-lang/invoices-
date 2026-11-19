@@ -1,5 +1,6 @@
 import React from 'react';
 import { convertTo12HourFormat } from '../../utils/timeUtils';
+import { getPackUnitInfo } from '../../utils/packUnitUtils';
 
 /**
  * Pixel-perfect, compact component matching the Sri Chenna Kesava Traders Tax Invoice Reference
@@ -30,7 +31,35 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
       ];
 
   const totalGst = invoice.totalGst || invoice.totalTax || 0;
-  const colSpanCount = 5;
+  const colSpanCount = 7;
+
+  // Compute breakdown of Cartons, Sheets, Boxes, and Pieces dynamically
+  const totalCartons = items
+    .filter((r) => r.sellUnit === 'Carton' || r.sellUnit === 'Cotton' || r.unit === 'Carton' || r.unit === 'Cotton')
+    .reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
+  
+  const otherUnitCounts = {};
+  items.forEach((r) => {
+    const u = r.sellUnit || r.unit || 'Box';
+    if (u === 'Carton' || u === 'Cotton' || u === 'Piece') return;
+    const unitInfo = getPackUnitInfo(r.packType, r.itemName);
+    const unitName = unitInfo.plural;
+    otherUnitCounts[unitName] = (otherUnitCounts[unitName] || 0) + (Number(r.qty) || 0);
+  });
+
+  const totalPieces = items
+    .filter((r) => r.sellUnit === 'Piece' || r.unit === 'Piece')
+    .reduce((sum, r) => sum + (Number(r.qty) || 0), 0);
+
+  const otherUnitTexts = Object.entries(otherUnitCounts)
+    .filter(([_, count]) => count > 0)
+    .map(([name, count]) => `${count} ${name}`);
+
+  const totalQtyText = [
+    totalCartons > 0 ? `${totalCartons} Carton${totalCartons > 1 ? 's' : ''}` : null,
+    ...otherUnitTexts,
+    totalPieces > 0 ? `${totalPieces} Pcs` : null,
+  ].filter(Boolean).join(' | ') || `${invoice.totalQty || 0} Units`;
 
   return (
     <div
@@ -146,6 +175,7 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
               <tr className="border-b-[1.5px] border-black bg-neutral-100 font-bold text-black">
                 <th className="border-r-[1px] border-black py-1 px-1 w-6">S.No</th>
                 <th className="border-r-[1px] border-black py-1 px-1.5 text-left">Item Name (SKU)</th>
+                <th className="border-r-[1px] border-black py-1 px-1 w-14">HSN</th>
                 <th className="border-r-[1px] border-black py-1 px-1 w-16">Qty & Unit</th>
                 <th className="border-r-[1px] border-black py-1 px-1 text-right w-14">Rate/Unit<br />(Rs.)</th>
                 <th className="border-r-[1px] border-black py-1 px-1 text-right w-14">Taxable<br />(Rs.)</th>
@@ -156,11 +186,12 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
             <tbody>
               {items.map((item, index) => {
                 const unitLabel = item.sellUnit || item.unit || 'Box';
+                const unitInfo = getPackUnitInfo(item.packType, item.itemName);
                 const formattedUnit = (unitLabel === 'Carton' || unitLabel === 'Cotton') 
                   ? 'Carton' 
                   : unitLabel === 'Piece' 
                   ? 'Pcs' 
-                  : 'Boxes';
+                  : unitInfo.plural;
                 const rate = item.unitPrice ?? item.mrp ?? 0;
                 const taxable = item.taxableAmount !== undefined ? item.taxableAmount : (item.amount - (item.gstAmount || 0));
                 const gstRate = item.gstPercent !== undefined ? item.gstPercent : 5;
@@ -173,6 +204,9 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
                     <td className="border-r-[1px] border-black py-0.5 px-1">{index + 1}</td>
                     <td className="border-r-[1px] border-black py-0.5 px-1.5 text-left font-medium">
                       {item.itemName} {item.packType ? `(${item.packType})` : ''}
+                    </td>
+                    <td className="border-r-[1px] border-black py-0.5 px-1 text-center font-mono text-[9px] text-neutral-800">
+                      {item.hsnCode || item.hsn || '-'}
                     </td>
                     <td className="border-r-[1px] border-black py-0.5 px-1 font-semibold whitespace-nowrap">
                       {item.qty} {formattedUnit}
@@ -193,9 +227,13 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
                 );
               })}
 
-              {/* Sub Total (Taxable Original Price) */}
+              {/* Total Qty / Boxes / Cartons Summary Row */}
               <tr className="border-b-[1px] border-black bg-neutral-100 font-bold text-[9.5px]">
-                <td colSpan={6} className="border-r-[1px] border-black py-1 px-2 text-right">
+                <td colSpan={3} className="border-r-[1px] border-black py-1 px-2 text-center">
+                  <span className="font-extrabold text-black uppercase">Total Qty: </span>
+                  <span className="font-black text-black">{totalQtyText}</span>
+                </td>
+                <td colSpan={4} className="border-r-[1px] border-black py-1 px-2 text-right">
                   Sub Total (Original Price):
                 </td>
                 <td className="py-1 px-1.5 text-right font-mono whitespace-nowrap">
@@ -205,7 +243,7 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
 
               {/* Total GST in Rupees */}
               <tr className="border-b-[1px] border-black bg-neutral-100 font-bold text-[9.5px]">
-                <td colSpan={6} className="border-r-[1px] border-black py-1 px-2 text-right">
+                <td colSpan={7} className="border-r-[1px] border-black py-1 px-2 text-right">
                   Total GST (All Items):
                 </td>
                 <td className="py-1 px-1.5 text-right font-mono text-slate-800 whitespace-nowrap">
@@ -216,7 +254,7 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
               {/* Discount Row (Percentage or Flat) */}
               {(Number(invoice.discountAmount || 0) > 0 || Number(invoice.discountPercent || 0) > 0) && (
                 <tr className="border-b-[1px] border-black bg-neutral-100 font-bold text-[9.5px]">
-                  <td colSpan={6} className="border-r-[1px] border-black py-1 px-2 text-right text-emerald-800">
+                  <td colSpan={7} className="border-r-[1px] border-black py-1 px-2 text-right text-emerald-800">
                     Discount {invoice.discountType === 'flat' ? '(Flat)' : `(${invoice.discountPercent || 0}%)`}:
                   </td>
                   <td className="py-1 px-1.5 text-right font-mono text-emerald-800 font-bold whitespace-nowrap">
@@ -227,7 +265,7 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
 
               {/* Grand Total Row */}
               <tr className="border-b-[1.5px] border-black font-bold text-[10.5px] bg-neutral-50">
-                <td colSpan={6} className="border-r-[1px] border-black py-1 px-2 text-right uppercase tracking-wider">
+                <td colSpan={7} className="border-r-[1px] border-black py-1 px-2 text-right uppercase tracking-wider">
                   Grand Total (Incl. GST):
                 </td>
                 <td className="py-1 px-1.5 text-right font-mono text-black font-black whitespace-nowrap">
@@ -252,11 +290,14 @@ export const PrintableInvoice = ({ invoice, isPrintMode = false }) => {
           <div className="sm:col-span-7 p-1.5 sm:p-2">
             <p className="font-bold text-black mb-0.5">Terms & Conditions:</p>
             <ol className="list-none space-y-0.5 text-neutral-700">
-              {terms.map((term, i) => (
-                <li key={i}>
-                  {term.match(/^\d+\./) ? term : `${i + 1}. ${term}`}
-                </li>
-              ))}
+              {terms.map((term, i) => {
+                const cleanTerm = typeof term === 'string' ? term.replace(/^\d+[\.\)]\s*/, '').trim() : '';
+                return (
+                  <li key={i}>
+                    {`${i + 1}. ${cleanTerm}`}
+                  </li>
+                );
+              })}
             </ol>
           </div>
 
